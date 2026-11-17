@@ -1,10 +1,7 @@
 # The fox
 
-An original character for Desktop Lump. Pick him with right-click → **Character → Fox**.
-
-He's drawn entirely in code by his own rig. None of Lump's drawings, animations, sounds or drawing
-code is used, so he isn't covered by Lump's art license (`LICENSE-ART.md`). He belongs to whoever
-commissioned him, and they choose his license.
+Fox Buddy's character: an original fox, drawn entirely in code by his own rig. He's under the
+repository's MIT license (see `LICENSE`).
 
 | File | What it does |
 |---|---|
@@ -14,7 +11,7 @@ commissioned him, and they choose his license.
 
 ## What he does
 
-He has the same 10 moods as Lump, so the bridge drives him unchanged:
+He has 10 moods, which the bridge picks from what Claude is doing:
 
 - **asleep**: dozing upright
 - **night**: curled up under his own tail
@@ -38,8 +35,7 @@ mood: pounce, tail chase, sneeze, howl, zoomies, hiccup, leaf, boop, yawn, peeka
 and dubstep. At
 night he only gives a grumpy one-eyed startle, and before meetings he checks his clock.
 
-He's silent: his gags never ask the bridge for a sound (it only has Lump's). The bridge's mood chimes
-are a bridge setting: `curl -X POST 127.0.0.1:47823/sound -d off` turns them off.
+He's silent: his gags never ask the bridge for a sound, and Fox Buddy ships no sounds.
 
 ## Adding to him
 
@@ -51,4 +47,4 @@ A drawing is just a pose, for example:
 
 See the top of `rig.js` for every setting. A gag is a list of `[ticks, pose]` beats in `GAG`, in
 `character.js`, at 24 ticks a second. Every beat eases into the next (`smooth()`), so you only write the
-key poses: there's a fresh drawing every tick. Re-run `zsh tools/desklump/build.sh` after changing anything.
+key poses: there's a fresh drawing every tick. Re-run `zsh tools/foxbuddy/build.sh` after changing anything.

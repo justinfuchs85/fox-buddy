@@ -1,4 +1,4 @@
-// Lump for claude.ai: collects every claude.ai tab's report and sends the whole picture to the
+// Fox Buddy for claude.ai: collects every claude.ai tab's report and sends the whole picture to the
 // Desk Buddy bridge (POST http://127.0.0.1:47823/browser), in the shape tools/appwatch sends for
 // the desktop app. Each report replaces the last, so a tab that's gone simply isn't in it.
 //
@@ -31,7 +31,7 @@ function report() {
     .catch(() => {});                                                       // bridge not running: fine
 }
 
-// Desktop Lump's "Show me": bring the tab with this chat to the front, and its window with it.
+// Fox Buddy's "Show me": bring the tab with this chat to the front, and its window with it.
 function focus(name) {
   for (const [id, r] of tabs) {
     if (r.title !== name) continue;

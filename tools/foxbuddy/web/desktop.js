@@ -1,19 +1,18 @@
-// Desktop Lump: the board's player, in the browser, so Lump can live in a corner of the Mac's desktop.
+// Fox Buddy's player: runs the fox in a corner of the Mac's desktop.
 //
-// Loaded after design/lump.html (whose gallery is switched off: see the app's start-up script),
-// design/clip_kit.js and every design/clips/*.js. It does what firmware/src/main.cpp does: one sequence at a
-// time (a mood's loop, a transition, or an event), routing between moods through the drawn transitions,
-// escalating alert -> waiting and working -> longhaul by itself, picking a tap gag, and going its own way
-// (idle, asleep at night, with a little unplugged cable) when the bridge goes quiet.
+// Loaded after the character (characters/fox: fox.js, rig.js, character.js, which set window.__character).
+// One sequence at a time (a mood's loop, a transition, or an event), routing between moods through the
+// drawn transitions, escalating alert -> waiting and working -> longhaul by itself, picking a tap gag, and
+// going his own way (idle, asleep at night) when the bridge goes quiet.
 //
-// The bridge talks to it exactly as it talks to the board, one line at a time:
+// The bridge talks to it one line at a time:
 //   s <mood>  e <event>  o <working> <waiting> <unseen>  c <rrggbb>  p <0|1>  h <secs>  k <token>  X  ?
-//   t <clip>  (desktop only: this clip is one of the tap reactions; the board learns that from the clip upload)
-// and hears back "tap", "gag <name>", "tapclip <name>", "resync" and "ok ..." lines, like the board's.
+//   t <clip>  (this clip is one of the tap reactions)   n <json>  (a line of narration for the bubble)
+// and hears back "tap", "gag <name>", "tapclip <name>", "resync" and "ok ..." lines.
 //
-// The app passes lines in with desk.line(text) and gets ours from the "lump" message handler.
+// The app passes lines in with desk.line(text) and gets ours from the "fox" message handler.
 (() => {
-  const L = window.__character || window.__lump;   // the fox (characters/fox) or the desk Lump (design/lump.html)
+  const L = window.__character;   // the fox (characters/fox)
   const FPS = 24, ESCALATE_MS = 45000, LONGHAUL_MS = 10 * 60 * 1000, HOST_TIMEOUT_MS = 60000, OFFLINE_MARK_AFTER_MS = 8000;
   const NIGHT_FROM = 0, NIGHT_UNTIL = 8;
   const TANGERINE = [255, 122, 69];
@@ -24,9 +23,9 @@
   const said = [];
   function say(text) {
     said.push(text); if (said.length > 200) said.shift();
-    try { window.webkit.messageHandlers.lump.postMessage({ say: text }); } catch (e) { /* headless test: read desk.said */ }
+    try { window.webkit.messageHandlers.fox.postMessage({ say: text }); } catch (e) { /* headless test: read desk.said */ }
   }
-  function tell(msg) { try { window.webkit.messageHandlers.lump.postMessage(msg); } catch (e) {} }
+  function tell(msg) { try { window.webkit.messageHandlers.fox.postMessage(msg); } catch (e) {} }
 
   // ---------- the sequences ----------
   const meta = L.meta();
@@ -49,7 +48,7 @@
     return c && MOODS.includes(c.home) && c.seq && c.seq.length ? { kind: 'event', key: n, from: c.home, to: c.home } : null;
   };
 
-  // ---------- player (firmware: "player") ----------
+  // ---------- player ----------
   let target = 'idle', curMood = 'idle', cur = loopOf('idle'), seqStart = 0, loopSince = 0, nextFidget = 0, pendingEvent = null;
   let prepMode = false, demo = false;
   const tapClips = new Set();
@@ -81,7 +80,7 @@
   }
   function setTarget(m) { target = m; if (cur.kind === 'loop') settle(curMood); }
 
-  const GAGS = L.GAGS || ['shock', 'moto', 'wolf', 'accordion', 'anvil', 'disco', 'banana', 'balloon', 'sneeze', 'moon', 'bomb'];
+  const GAGS = L.GAGS || [];
   let lastGag = -1, lastTapClip = '';
   function pickTap() {
     const pool = GAGS.map((g, i) => i).filter(i => i !== lastGag);
@@ -148,7 +147,7 @@
     demoNext = now + ms;
   }
 
-  // ---------- commands (firmware: handleLine) ----------
+  // ---------- commands ----------
   const reply = () => say(`ok mode=${demo ? 'demo' : offline ? 'offline' : 'direct'} target=${target} playing=${cur.key}(${cur.kind})`);
   function line(ln) {
     ln = String(ln).trim(); if (!ln) return;
@@ -190,7 +189,7 @@
   // ---------- drawing ----------
   let look = 'float';                 // float: no background, light line, a dark halo so he reads on any wallpaper
                                       // ink: no background, dark line (like a cartoon on paper)
-                                      // glass: his black prism screen, exactly as the board shows him
+                                      // glass: on his own dark rounded tile
   let tintNow = [...TANGERINE], goal = [...TANGERINE];
   const hex = rgb => '#' + rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
   const canvas = document.createElement('canvas');
@@ -317,5 +316,5 @@
   };
   settle('idle');
   rAF(frame);
-  tell({ ready: true, clips: window.desk.clips(), gags: GAGS, character: L.name || 'lump' });
+  tell({ ready: true, clips: window.desk.clips(), gags: GAGS, character: L.name || 'fox' });
 })();

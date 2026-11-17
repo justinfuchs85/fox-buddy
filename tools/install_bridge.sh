@@ -1,6 +1,6 @@
 #!/bin/bash
-# Install (or update) the Desk Buddy bridge and app watcher as macOS login items.
-#   com.deskbuddy.bridge    Python bridge: Claude Code hooks + Chat/Cowork state -> Lump over USB
+# Install (or update) the Fox Buddy bridge and app watcher as macOS login items.
+#   com.deskbuddy.bridge    Python bridge: Claude Code hooks + Chat/Cowork/claude.ai state -> the fox
 #   com.deskbuddy.appwatch  small native helper that reads the Claude app's accessibility tree
 #                           (Chat and Cowork have no hooks). Only this helper needs Accessibility.
 # Runtime lives in ~/.desk-buddy (outside iCloud, so it's never evicted):
@@ -31,10 +31,6 @@ chmod 700 "$RT"
 "$RT/venv/bin/pip" -q install --disable-pip-version-check --upgrade pip
 "$RT/venv/bin/pip" -q install --disable-pip-version-check pyserial icalendar recurring-ical-events
 cp "$ROOT/tools/buddy_bridge.py" "$RT/bridge.py"
-# Lump's voice: renders the WAVs, and installs sounds.json (which moments make a noise) the first time.
-python3 "$ROOT/tools/make_sounds.py"
-# ...and the sound effects for his tap gags (tap_<gag>.wav), timed to the drawings in design/lump.html.
-python3 "$ROOT/tools/make_gag_sounds.py"
 
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

@@ -1,6 +1,6 @@
-// The fox: an original character for Desktop Lump, drawn entirely in code.
+// The fox: Fox Buddy's original character, drawn entirely in code.
 //
-// Nothing here comes from design/lump.html: not its drawings, not its drawing code. The fox is a rig
+// The fox is a rig
 // (a puppet with a pose), and every drawing is just a pose: how squashed he is, where his ears and tail
 // point, which eyes and mouth he's wearing, what he's holding. Moods, transitions and gags are poses
 // over time, so a few hundred drawings stay consistent with each other.

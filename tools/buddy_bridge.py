@@ -1,8 +1,11 @@
-"""Desk Buddy bridge: Claude Code hooks -> Lump on the ESP32.
+"""Fox Buddy bridge: Claude Code hooks (and claude.ai, and the Claude app) -> the fox on your desktop.
+
+Based on the desk-buddy bridge by Joe Bentham (MIT). It can still drive a board over USB serial or
+Wi-Fi, but in Fox Buddy it talks to the desktop app (tools/foxbuddy) on 127.0.0.1:4210.
 
 Claude Code hooks POST their JSON to http://127.0.0.1:47823/hook. The bridge keeps
-a little state per session, merges all sessions into one mood, and tells the board
-over USB serial only when that mood changes:
+a little state per session, merges all sessions into one mood, and tells the fox
+only when that mood changes:
 
   any session waiting on you (permission prompt, question, plan approval) -> alert
   otherwise any session working                                            -> working
@@ -29,9 +32,9 @@ of your VIPs makes him hold up a letter until Slack says you've read it (or half
 any other DM, or a message that @-mentions you, sends a paper plane looping round him, once.
 Channel traffic that doesn't tag you is never looked at, and "needs you" from Claude always wins.
 
-He also has a little ocarina voice that plays on the Mac's speakers (class Sounds): the WAVs
-come from tools/make_sounds.py and which moments make a sound lives in ~/.desk-buddy/sounds.json
-("enabled" is the master switch; Claude Switcher's right-click menu flips it).
+Optional sounds play on the Mac's speakers (class Sounds): WAVs you put in ~/.desk-buddy/sounds, with
+which moments make a sound in ~/.desk-buddy/sounds.json ("enabled" is the master switch, off by default).
+Fox Buddy ships no sounds: he's silent.
 
 It sends a heartbeat ("h", which also carries the time of day) every 15 s; without it the board
 goes its own way after a minute and shows he's not connected. Session state is kept in
@@ -39,7 +42,7 @@ goes its own way after a minute and shows he's not connected. Session state is k
 
 Extras for debugging:  GET /status   POST /cmd  (body: a raw command such as "s done")
                        GET /play     POST /play (body: an animation's name, or a clip's: a file in
-                       ~/.desk-buddy/clips made by tools/export_frames.py --clip, sent to him over Wi-Fi)
+                       ~/.desk-buddy/clips, sent to a board over Wi-Fi)
                        GET /sound    POST /sound (body: on | off | toggle | play <moment>)
                        (play tap_<gag>_<mood> plays a gag's sound, e.g. play tap_shock_idle)
 Install as a login item with tools/install_bridge.sh.
@@ -100,7 +103,7 @@ STILL_WAITING_AFTER = 45                # matches the board's alert -> waiting e
 LONG_JOB_AFTER = 10 * 60                # matches the board's working -> longhaul
 NIGHT_AWAKE = 15 * 60
 FIDGET_EVERY = (5 * 60, 15 * 60)
-# Gag sounds (tools/make_gag_sounds.py -> sounds/tap_<gag>.wav): the board prints "gag tap_<gag>_<mood>"
+# Gag sounds (sounds/tap_<gag>.wav, if you add any): the board prints "gag tap_<gag>_<mood>"
 # the moment a gag starts. Each sound is timed from the gag's first drawing, which comes GAG_LEAD after
 # that (his way in from the mood is padded to 12 frames at 24 fps); the night startle has no way in.
 GAG_LEAD = 0.5
@@ -112,7 +115,7 @@ HEARTBEAT_EVERY = 15
 NET_PORT = 4210                                    # the board's command port on Wi-Fi (tools/wifi_setup.py)
 STATE_FILE = os.path.join(HOME, "state.json")     # sessions etc. survive a bridge restart
 CLIPS_DIR = os.path.join(HOME, "clips")           # extra animations sent to him over Wi-Fi when asked for (<name>.clip)
-# Desktop Lump (tools/desklump): an app that draws him in a corner of the Mac's screen and listens on
+# Fox Buddy (tools/foxbuddy): the app that draws the fox in a corner of the Mac's screen and listens on
 # 127.0.0.1:4210 like a board. config.json "desktop_lump": true makes the bridge talk to it first.
 # It draws every clip itself, so nothing is sent: it lists the clips it has in DESKTOP_CLIPS.
 DESKTOP_HOST = "127.0.0.1"
@@ -191,11 +194,11 @@ def command_clip(cmd, worked, payload):
     return None
 
 
-# ---------- narration (Desktop Lump's speech bubble) ----------
-# Desktop Lump can say what Claude is up to in a speech bubble. The bridge turns events into one short
+# ---------- narration (Fox Buddy's speech bubble) ----------
+# Fox Buddy can say what Claude is up to in a speech bubble. The bridge turns events into one short
 # line each and sends them to the desktop app only ("n <json>": the board has no bubble). Nothing here is
 # logged: a line can include a command or the start of Claude's reply.
-QUICK_ASK_DIR = os.path.join(HOME, "ask")          # Desktop Lump's quick questions run here: never narrated
+QUICK_ASK_DIR = os.path.join(HOME, "ask")          # Fox Buddy's quick questions run here: never narrated
 APP_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]{2,100}")
 CLAUDE_APP_ID = "com.anthropic.claudefordesktop"
 
@@ -285,7 +288,7 @@ def read_config():
 
 class Device:
     """Owns the link to the board: USB serial when it's plugged in, otherwise Wi-Fi (TCP to
-    lump.local:4210, set up with tools/wifi_setup.py, which stores "lump_token" in config.json).
+    lump.local:4210, with "lump_token" in config.json).
     Reconnects when the board is unplugged, reboots or drops off the network, and moves back to
     USB as soon as a cable appears."""
 
@@ -599,7 +602,7 @@ class Focus:
 
 
 class Sounds:
-    """Plays Lump's voice through afplay. Settings are re-read whenever sounds.json changes, so
+    """Plays sounds through afplay. Settings are re-read whenever sounds.json changes, so
     flipping "enabled" (Claude Switcher, POST /sound, or by hand) takes effect immediately.
       {"enabled": true, "volume": 1.0, "quiet_at_night": true,
        "moments": {"needs_you": {"on": true, "pick": ["a", "c"]}, ...}}
@@ -658,7 +661,7 @@ class Sounds:
             k = random.choice(pool)
             path = os.path.join(SOUNDS_DIR, f"{moment}_{k}.wav")
             if not os.path.exists(path):
-                log.info("sound %s missing (run tools/make_sounds.py)", path)
+                log.info("sound %s missing", path)
                 return False
             if self.proc and self.proc.poll() is None:
                 self.proc.terminate()                         # one voice at a time
@@ -687,7 +690,7 @@ class Sounds:
             if not force and (not cfg.get("enabled") or not (cfg.get("moments") or {}).get("tap_gags", {"on": True}).get("on", True)):
                 return False
             if not os.path.exists(path):
-                log.info("sound %s missing (run tools/make_gag_sounds.py)", path); return False
+                log.info("sound %s missing", path); return False
             try:
                 with wave.open(path) as w:
                     length = w.getnframes() / w.getframerate()
@@ -720,7 +723,7 @@ def _mix(a, b, k): A, B = _hex(a), _hex(b); return "".join(f"{round(x + (y - x) 
 
 
 # --- vivid blending: OKLCH, around the colour wheel (a straight RGB blend from orange toward
-# blue/teal passes through grey). Same maths as the colour lab on design/lump.html.
+# blue/teal passes through grey). (Same maths as the original desk-buddy colour lab.)
 def _s2l(c): return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 def _l2s(c): return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
 
@@ -855,7 +858,7 @@ class Buddy:
     def hook(self, p, app=None):
         ev, sid, now = p.get("hook_event_name", ""), p.get("session_id", "?"), time.time()
         event = None
-        say = None                                    # what to put in Desktop Lump's speech bubble, if anything
+        say = None                                    # what to put in Fox Buddy's speech bubble, if anything
         with self.lock:
             fresh = now - self.last_event > HELLO_AFTER
             self.last_event = now
@@ -920,7 +923,7 @@ class Buddy:
             self.narrate(*say)
 
     def narration(self, p, ev, s, prev, state):
-        """(text, kind, jump) for Desktop Lump's bubble, or None. Called with the lock held."""
+        """(text, kind, jump) for Fox Buddy's bubble, or None. Called with the lock held."""
         cwd = p.get("cwd") or s.get("cwd") or ""
         if os.path.realpath(cwd or "/") == os.path.realpath(QUICK_ASK_DIR):
             return None                                  # the fox's own quick question: the bubble has the answer already
@@ -945,7 +948,7 @@ class Buddy:
         return None
 
     def narrate(self, text, kind, jump=None):
-        """Send a line to Desktop Lump's speech bubble. Busy chatter is thinned out; needs-you and done always go."""
+        """Send a line to Fox Buddy's speech bubble. Busy chatter is thinned out; needs-you and done always go."""
         if getattr(self.dev, "link", None) != "desktop":
             return
         now = time.time()
@@ -1405,7 +1408,7 @@ class Buddy:
 
     def send_clip(self, name, tap=False):
         """Give the board a clip over Wi-Fi (it keeps clips in RAM, so again after it restarts or the file changes)."""
-        if getattr(self.dev, "link", None) == "desktop":      # Desktop Lump draws every clip itself: just say which are tap reactions
+        if getattr(self.dev, "link", None) == "desktop":      # Fox Buddy draws every clip itself: just say which are tap reactions
             if tap:
                 self.dev.send(f"t {name}", quiet=True)
             return name in desktop_clips()
@@ -1609,7 +1612,7 @@ class SlackWatch:
     im:read im:history mpim:read mpim:history users:read search:read). Every SLACK_EVERY seconds:
 
       VIPs ("slack_vips" in config.json, names as Slack shows them): their 1:1 DMs are checked for
-      unread messages. One you haven't read -> Lump holds up a letter until Slack no longer counts it
+      unread messages. One you haven't read -> he holds up a letter until Slack no longer counts it
       unread (read it anywhere, phone included) or the hold time passes. A newer message re-arms it.
       Everyone else: a search for messages sent to you (DMs and group DMs) and messages that @-mention
       you by name. Each new one, unless it's yours or a bot's, sends one paper plane.
@@ -1795,10 +1798,10 @@ buddy = None
 # Who may talk to the bridge. It only listens on 127.0.0.1, but a web page in a browser can still send
 # requests there (or, with DNS rebinding, read the answers), so:
 #   Host must be this machine by name (a rebinding attack arrives with its own domain in Host);
-#   requests a browser makes carry an Origin header, and only the Lump for claude.ai extension
+#   requests a browser makes carry an Origin header, and only the Fox Buddy for claude.ai extension
 #   (tools/browserwatch: chrome-extension://... in Chrome, safari-web-extension://... in Safari)
 #   is let in, and only to /browser.
-# Hooks, the status line, the app watcher and Desktop Lump send no Origin, so they're unaffected.
+# Hooks, the status line, the app watcher and Fox Buddy send no Origin, so they're unaffected.
 ALLOWED_HOSTS = {f"127.0.0.1:{HTTP_PORT}", f"localhost:{HTTP_PORT}", "127.0.0.1", "localhost"}
 MAX_BODY = 2_000_000                    # hook payloads can carry a big tool result; nothing legitimate is bigger
 SOUND_NAME = re.compile(r"[a-z0-9_]{1,60}")
@@ -1837,13 +1840,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/browser":             # claude.ai in Chrome, from the tools/browserwatch extension
             try: buddy.browser.snapshot(json.loads(body or b"{}"))
             except Exception as e: log.info("bad browser snapshot: %s", e)
-            want = getattr(buddy, "focus_tab", None)     # Desktop Lump's "Show me": the extension brings that tab forward
+            want = getattr(buddy, "focus_tab", None)     # Fox Buddy's "Show me": the extension brings that tab forward
             if want and time.time() - want[1] < 15:
                 buddy.focus_tab = None
                 self._reply(200, json.dumps({"focus": want[0]}).encode(), "application/json")
             else:
                 self._reply(204)
-        elif self.path == "/jump":                # from Desktop Lump: bring this claude.ai chat's tab forward
+        elif self.path == "/jump":                # from Fox Buddy: bring this claude.ai chat's tab forward
             self._reply(204)
             try:
                 key = (json.loads(body or b"{}").get("web") or "")[:60]

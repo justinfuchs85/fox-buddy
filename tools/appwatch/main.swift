@@ -1,4 +1,4 @@
-// deskbuddy-appwatch: reports Chat and Cowork activity in the Claude desktop app to the Desk Buddy bridge.
+// deskbuddy-appwatch: reports Chat and Cowork activity in the Claude desktop app to the Fox Buddy bridge.
 //
 // Chat and Cowork have no hooks, so every 2 s this reads the Claude app's accessibility tree and
 // posts raw signals to the bridge (http://127.0.0.1:47823/app). All the rules for what counts as

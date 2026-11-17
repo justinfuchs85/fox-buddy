@@ -240,7 +240,7 @@ class AppWatcher(BridgeTest):
         self.assertEqual(self.mood(), "working")
 
     def test_a_web_page_with_its_own_stop_button_is_not_a_chat(self):
-        self.snap("Lump Gag Sounds", buttons=["Play all", "Stop"])
+        self.snap("Gag Sound Board", buttons=["Play all", "Stop"])
         self.assertEqual(self.mood(), "idle")
 
 
@@ -627,7 +627,7 @@ class TwoAccounts(BridgeTest):
         self.assertEqual(bridge.account_of_data_dir("/Users/me/Library/Application Support/Claude-Work"), "work")
         self.assertEqual(bridge.account_of_data_dir("/Users/me/Library/Application Support/Claude"), "personal")
 
-    def test_a_work_code_session_drives_lump(self):
+    def test_a_work_code_session_drives_the_fox(self):
         self.hook("UserPromptSubmit", "work1", transcript_path=WORK_TRANSCRIPT)
         self.assertEqual(self.mood(), "working")
         self.hook("PermissionRequest", "work1", transcript_path=WORK_TRANSCRIPT)
@@ -728,8 +728,8 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class DesktopLumpTest(BridgeTest):
-    """Desktop Lump (tools/desklump): a board on 127.0.0.1 that draws every clip itself."""
+class FoxBuddyAppTest(BridgeTest):
+    """Fox Buddy (tools/foxbuddy): a board on 127.0.0.1 that draws every clip itself."""
 
     def setUp(self):
         super().setUp()
@@ -831,7 +831,7 @@ class RequestGuardTest(unittest.TestCase):
 
 
 class NarrationTest(BridgeTest):
-    """Desktop Lump's speech bubble: one short line per event, sent only to the desktop app."""
+    """Fox Buddy's speech bubble: one short line per event, sent only to the desktop app."""
 
     def setUp(self):
         super().setUp()

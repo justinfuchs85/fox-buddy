@@ -1,6 +1,5 @@
-// Runs before design/lump.html's own script. That page is the design gallery: it would animate dozens of
-// preview canvases forever. Keep its drawings and its window.__lump hook, but never start its loop, and hide
-// everything it puts on the page. desktop.js (loaded after the clips) uses the real animation timer instead.
+// Runs before the character's scripts: the page is just a transparent stage for the fox's canvas.
+// Hand the real animation timer to desktop.js and stub the global one, so nothing else starts a loop.
 window.__realRAF = window.requestAnimationFrame.bind(window);
 window.requestAnimationFrame = () => 0;
 (() => {

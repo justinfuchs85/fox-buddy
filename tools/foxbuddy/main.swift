@@ -1,17 +1,16 @@
-// Desktop Lump: the desk Lump, living in a corner of the Mac's screen instead of in a glass prism.
+// Fox Buddy: a fox who lives in a corner of the Mac's screen and keeps an eye on Claude for you.
 //
-// He's the real thing, not a picture of it: design/lump.html draws him (plus design/clip_kit.js and every
-// design/clips/*.js) in a transparent web view, and web/desktop.js plays him the way firmware/src/main.cpp
-// does on the board. To the bridge he *is* a board: this app listens on 127.0.0.1:4210 and speaks the
-// board's line protocol (tools/buddy_bridge.py connects when config.json has "desktop_lump": true), so
-// moods, colours, corner counts, gags, sounds and the bridge's automatic clips all work unchanged.
-// Without the bridge he goes his own way: asleep, fidgeting, at night under his blanket.
+// characters/fox draws him in a transparent web view and web/desktop.js plays him. To the bridge
+// (tools/buddy_bridge.py) he's a device on a socket: this app listens on 127.0.0.1:4210 and speaks the
+// bridge's line protocol (the bridge connects when config.json has "desktop_lump": true, a setting name
+// kept from the project this one grew out of), so moods, colours, corner counts and gags all come through.
+// Without the bridge he goes his own way: idling, fidgeting, asleep at night.
 //
-// Click him to tap the glass; double-click to ask him a question. Drag him anywhere. Right-click for
-// size, look, corner and the clip library. His speech bubble says what Claude is doing (the bridge sends
+// Click him to tap him; double-click to ask him a question. Drag him anywhere. Right-click for
+// size, look, corner, gags and clips. His speech bubble says what Claude is doing (the bridge sends
 // "n <json>" lines), with "Show me" to bring that session forward.
 // Clicks on the empty space around him go through to whatever is underneath.
-// Build and launch: zsh tools/desklump/build.sh
+// Build and launch: zsh tools/foxbuddy/build.sh
 
 import Cocoa
 import Network
@@ -21,31 +20,27 @@ import WebKit
 let BOARD_PORT: UInt16 = 4210
 let BRIDGE = "http://127.0.0.1:47823"
 let SIZES: [(String, CGFloat)] = [("Small", 120), ("Medium", 170), ("Large", 240), ("Huge", 340)]
-let LOOKS: [(String, String)] = [("float", "Floating"), ("ink", "Floating, Dark Outline"), ("glass", "Glass Screen (Like the Desk Lump)")]
-let GAGS = ["shock", "moto", "wolf", "accordion", "anvil", "disco", "banana", "balloon", "sneeze", "moon", "bomb"]
-let CHARACTERS: [(String, String)] = [("lump", "Lump"), ("fox", "Fox")]
-/// What each character is made of: its page and the scripts that draw it (from the app's web folder).
-let CHARACTER_FILES: [String: (page: String, scripts: [String])] = [
-    "lump": ("lump.html", ["clip_kit.js", "clips.bundle.js"]),
-    "fox": ("fox/fox.html", ["fox/fox.js", "fox/rig.js", "fox/character.js"]),
-]
+let LOOKS: [(String, String)] = [("float", "Floating"), ("ink", "Floating, Dark Outline"), ("glass", "On a Dark Tile")]
+/// The fox: his page and the scripts that draw him (from the app's web folder).
+let FOX_PAGE = "fox/fox.html"
+let FOX_SCRIPTS = ["fox/fox.js", "fox/rig.js", "fox/character.js"]
 let MARGIN: CGFloat = 12
 
 // MARK: - the board's socket
 
-/// Listens where the bridge looks for a Lump on the network, for one bridge at a time, on this Mac only.
+/// Listens where the bridge looks for its device on the network, for one bridge at a time, on this Mac only.
 ///
 /// A newcomer has to open with the board's pairing line ("k ...", which the bridge always sends first)
 /// within a few seconds before it's listened to or allowed to replace the current bridge. Anything else
 /// is hung up on, which matters because a web page can make the browser send an HTTP request to
-/// 127.0.0.1:4210: its first line is "POST / HTTP/1.1", so it never gets as far as Lump.
+/// 127.0.0.1:4210: its first line is "POST / HTTP/1.1", so it never gets as far as the fox.
 final class BoardLink {
     var onLine: ((String) -> Void)?
     var onChange: ((Bool) -> Void)?
     private var listener: NWListener?
     private var conn: NWConnection?
     private var buffer = Data()
-    private let queue = DispatchQueue(label: "desklump.link")
+    private let queue = DispatchQueue(label: "foxbuddy.link")
     private(set) var connected = false { didSet { let c = connected; DispatchQueue.main.async { self.onChange?(c) } } }
 
     func start() {
@@ -53,12 +48,12 @@ final class BoardLink {
         params.allowLocalEndpointReuse = true
         params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: BOARD_PORT)!)
         do { listener = try NWListener(using: params) } catch {
-            NSLog("desklump: can't listen on 127.0.0.1:\(BOARD_PORT): \(error)"); return
+            NSLog("foxbuddy: can't listen on 127.0.0.1:\(BOARD_PORT): \(error)"); return
         }
         listener?.newConnectionHandler = { [weak self] c in self?.accept(c) }
         listener?.stateUpdateHandler = { [weak self] st in
             if case .failed(let e) = st {
-                NSLog("desklump: listener failed: \(e); retrying in 5 s")
+                NSLog("foxbuddy: listener failed: \(e); retrying in 5 s")
                 self?.listener?.cancel()
                 self?.queue.asyncAfter(deadline: .now() + 5) { self?.start() }
             }
@@ -179,7 +174,7 @@ final class GrabView: NSView {
     override func rightMouseDown(with e: NSEvent) { onMenu?(e) }
 }
 
-final class LumpPanel: NSPanel {
+final class FoxPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
@@ -187,7 +182,7 @@ final class LumpPanel: NSPanel {
 // MARK: - the speech bubble
 
 /// The bubble's own small window, beside him. Unlike his, it can take the keyboard (for typing a
-/// question) without making Desktop Lump the active app, like Spotlight's.
+/// question) without making Fox Buddy the active app, like Spotlight's.
 final class BubblePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -300,13 +295,13 @@ let TERMINAL_APPS: [String: String] = [
 
 final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     let link = BoardLink()
-    var panel: LumpPanel!
+    var panel: FoxPanel!
     var web: WKWebView!
     var grab: GrabView!
     var ready = false
     var queued: [String] = []
     var clips: [String] = []
-    var gags: [String] = GAGS               // the character's own tap gags, as it reports them
+    var gags: [String] = []                 // the character's own tap gags, as it reports them
     var webDir: URL!
     var hoverTimer: Timer?
     var hiddenByUser = false
@@ -336,10 +331,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         get { prefs.bool(forKey: "onDesktop") }
         set { prefs.set(newValue, forKey: "onDesktop") }
     }
-    var character: String {             // who's in the window: "lump" or "fox"
-        get { let v = prefs.string(forKey: "character") ?? "lump"; return CHARACTER_FILES[v] == nil ? "lump" : v }
-        set { prefs.set(newValue, forKey: "character") }
-    }
     var narrate: String {               // what the bubble says about Claude: "all", "important" (needs you / done) or "off"
         get { let v = prefs.string(forKey: "narrate") ?? "all"; return ["all", "important", "off"].contains(v) ? v : "all" }
         set { prefs.set(newValue, forKey: "narrate") }
@@ -351,12 +342,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     func applicationDidFinishLaunching(_ n: Notification) {
         guard let webDir = Bundle.main.url(forResource: "web", withExtension: nil) else {
-            NSLog("desklump: no web folder in the app bundle (build it with tools/desklump/build.sh)"); NSApp.terminate(nil); return
+            NSLog("foxbuddy: no web folder in the app bundle (build it with tools/foxbuddy/build.sh)"); NSApp.terminate(nil); return
         }
         self.webDir = webDir
         makeWindow(webDir)
         link.onLine = { [weak self] line in
-            if line.hasPrefix("n ") { self?.narration(String(line.dropFirst(2))) } else { self?.toLump(line) }
+            if line.hasPrefix("n ") { self?.narration(String(line.dropFirst(2))) } else { self?.toFox(line) }
         }
         link.onChange = { [weak self] on in self?.bridgeConnected = on }
         link.start()
@@ -374,10 +365,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     func makeWindow(_ webDir: URL) {
         let config = WKWebViewConfiguration()
-        config.userContentController.add(self, name: "lump")
+        config.userContentController.add(self, name: "fox")
 
         let frame = NSRect(origin: savedOrigin() ?? cornerOrigin("BR"), size: NSSize(width: side, height: side))
-        panel = LumpPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = FoxPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -404,13 +395,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         panel.contentView = content
 
         web.navigationDelegate = self
-        // Lump is drawn entirely from files inside the app: block every web request (lump.html links to
-        // Google Fonts, which build.sh also strips), so the app never contacts anything on the internet.
+        // The fox is drawn entirely from files inside the app: block every web request, so the app never
+        // contacts anything on the internet.
         let rules = #"[{"trigger":{"url-filter":"^(https?|wss?|ftp)://"},"action":{"type":"block"}}]"#
-        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "desklump-offline", encodedContentRuleList: rules) { [weak self] list, err in
+        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "foxbuddy-offline", encodedContentRuleList: rules) { [weak self] list, err in
             guard let self = self else { return }
             if let list = list { self.web.configuration.userContentController.add(list); self.offlineRules = list }
-            else { NSLog("desklump: couldn't install the offline rule: \(String(describing: err))") }
+            else { NSLog("foxbuddy: couldn't install the offline rule: \(String(describing: err))") }
             self.loadCharacter()
             self.makeBubble()
         }
@@ -421,18 +412,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// (Re)load the page with the chosen character's scripts. He comes up offline and asks the bridge
     /// to resend everything ("resync") as soon as it next says anything, so switching loses nothing.
     func loadCharacter() {
-        guard let files = CHARACTER_FILES[character] else { return }
         let uc = web.configuration.userContentController
         uc.removeAllUserScripts()
         func script(_ name: String, _ when: WKUserScriptInjectionTime) {
-            guard let src = try? String(contentsOf: webDir.appendingPathComponent(name), encoding: .utf8) else { NSLog("desklump: missing \(name)"); return }
+            guard let src = try? String(contentsOf: webDir.appendingPathComponent(name), encoding: .utf8) else { NSLog("foxbuddy: missing \(name)"); return }
             uc.addUserScript(WKUserScript(source: src, injectionTime: when, forMainFrameOnly: true))
         }
         script("start.js", .atDocumentStart)
-        files.scripts.forEach { script($0, .atDocumentEnd) }
+        FOX_SCRIPTS.forEach { script($0, .atDocumentEnd) }
         script("desktop.js", .atDocumentEnd)
         ready = false; queued.removeAll()
-        web.loadFileURL(webDir.appendingPathComponent(files.page), allowingReadAccessTo: webDir)
+        web.loadFileURL(webDir.appendingPathComponent(FOX_PAGE), allowingReadAccessTo: webDir)
     }
 
     func applyLayer() {
@@ -502,11 +492,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         decisionHandler(action.request.url?.isFileURL == true ? .allow : .cancel)
     }
 
-    // MARK: talking to Lump
+    // MARK: talking to the fox
 
     func js(_ code: String) { web.evaluateJavaScript(code, completionHandler: nil) }
 
-    func toLump(_ line: String) {
+    func toFox(_ line: String) {
         let quoted = (try? String(data: JSONSerialization.data(withJSONObject: [line]), encoding: .utf8)) ?? "[\"\"]"
         let call = "desk.line(\(quoted)[0])"
         if ready { js(call) } else { queued.append(call) }
@@ -519,7 +509,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if body["ready"] as? Bool == true {
             ready = true
             clips = (body["clips"] as? [String]) ?? []
-            gags = (body["gags"] as? [String]) ?? GAGS
+            gags = (body["gags"] as? [String]) ?? []
             publishClips()
             js("desk.setLook('\(look)')")
             queued.forEach(js); queued.removeAll()
@@ -538,11 +528,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// Ask the bridge to play something (so it gets its sound, and counts as his thing for the minute);
     /// if the bridge isn't there, he plays it himself.
     func play(_ name: String) {
-        guard bridgeConnected, let url = URL(string: BRIDGE + "/play") else { toLump("e " + name); return }
+        guard bridgeConnected, let url = URL(string: BRIDGE + "/play") else { toFox("e " + name); return }
         var req = URLRequest(url: url); req.httpMethod = "POST"; req.httpBody = name.data(using: .utf8); req.timeoutInterval = 3
         URLSession.shared.dataTask(with: req) { _, resp, err in
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
-            if !ok || err != nil { DispatchQueue.main.async { self.toLump("e " + name) } }
+            if !ok || err != nil { DispatchQueue.main.async { self.toFox("e " + name) } }
         }.resume()
     }
 
@@ -570,15 +560,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
         var gagItems = [item("A Random Gag", #selector(playNamed(_:)), rep: "tap"), NSMenuItem.separator()]
-        // Lump's gags go through the bridge by name (so they get their sounds); other characters play theirs as tap_<gag>
-        gagItems += gags.map { item(pretty($0), #selector(playNamed(_:)), rep: character == "lump" ? $0 : "tap_" + $0) }
+        gagItems += gags.map { item(pretty($0), #selector(playNamed(_:)), rep: "tap_" + $0) }
         m.addItem(sub("Gags", gagItems))
         var clipItems = [item("Surprise Me", #selector(playRandomClip)), NSMenuItem.separator()]
         clipItems += clips.map { item(pretty($0), #selector(playNamed(_:)), rep: $0) }
         m.addItem(sub("Clips (\(clips.count))", clipItems))
         m.addItem(item("Show Off (Every Mood, on a Loop)", #selector(demo)))
         m.addItem(.separator())
-        m.addItem(sub("Character", CHARACTERS.map { item($0.1, #selector(pickCharacter(_:)), on: character == $0.0, rep: $0.0) }))
         m.addItem(sub("Size", SIZES.map { item($0.0, #selector(pickSize(_:)), on: abs(side - $0.1) < 1, rep: $0.1) }))
         m.addItem(sub("Look", LOOKS.map { item($0.1, #selector(pickLook(_:)), on: look == $0.0, rep: $0.0) }))
         let corners = [("Top Left", "TL"), ("Top Right", "TR"), ("Bottom Left", "BL"), ("Bottom Right", "BR")]
@@ -589,15 +577,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             m.addItem(item("Open at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         }
         m.addItem(.separator())
-        m.addItem(item("Hide (Open Desktop Lump Again to Bring Him Back)", #selector(hideHim)))
-        m.addItem(item("Quit Desktop Lump", #selector(quit), key: "q"))
+        m.addItem(item("Hide (Open Fox Buddy Again to Bring Him Back)", #selector(hideHim)))
+        m.addItem(item("Quit Fox Buddy", #selector(quit), key: "q"))
         return m
     }
 
     @objc func tapNow() { js("desk.tap()") }
     @objc func playNamed(_ s: NSMenuItem) { if let n = s.representedObject as? String { play(n) } }
     @objc func playRandomClip() { if let n = clips.randomElement() { play(n) } }
-    @objc func demo() { toLump("s demo") }
+    @objc func demo() { toFox("s demo") }
     @objc func pickSize(_ s: NSMenuItem) {
         guard let v = s.representedObject as? CGFloat else { return }
         let old = panel.frame
@@ -609,10 +597,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         clampOnScreen()
     }
     @objc func pickLook(_ s: NSMenuItem) { if let v = s.representedObject as? String { look = v; js("desk.setLook('\(look)')") } }
-    @objc func pickCharacter(_ s: NSMenuItem) {
-        guard let v = s.representedObject as? String, v != character, CHARACTER_FILES[v] != nil else { return }
-        character = v; loadCharacter()
-    }
     @objc func pickCorner(_ s: NSMenuItem) { if let c = s.representedObject as? String { moveTo(cornerOrigin(c, on: visibleFrame()), animate: true) } }
     @objc func toggleSnap() { snap.toggle(); if snap { moved() } }
     @objc func toggleLayer() { onDesktop.toggle(); applyLayer(); panel.orderFrontRegardless() }
@@ -620,7 +604,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if #available(macOS 13.0, *) {
             do {
                 if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
-            } catch { NSLog("desklump: login item: \(error)") }
+            } catch { NSLog("foxbuddy: login item: \(error)") }
         }
     }
     @objc func hideHim() { hiddenByUser = true; panel.orderOut(nil); hideBubble() }

@@ -1,10 +1,10 @@
-"""Hook Claude Code up to Lump.
+"""Hook Claude Code up to Fox Buddy.
 
     python3 tools/install_hooks.py                      # ~/.claude/settings.json
     python3 tools/install_hooks.py --config-dir ~/.claude-work   # a second Claude Code config
     python3 tools/install_hooks.py --uninstall
 
-Adds one small async hook per Claude Code event that matters to Lump. Each hook POSTs the event's
+Adds one small async hook per Claude Code event that matters to the fox. Each hook POSTs the event's
 JSON to the bridge on 127.0.0.1:47823 and never blocks or fails Claude Code. It also installs the
 status line (tools/statusline.sh, which feeds your usage limits to his colour) unless you already
 have a status line of your own. Running it again changes nothing; settings.json is backed up first.
@@ -14,7 +14,7 @@ import argparse, json, os, shutil, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNTIME = os.path.expanduser("~/.desk-buddy")
 # X-Term-App: which app the session runs in (macOS gives every process a terminal starts its bundle id),
-# so Desktop Lump's "Show me" can bring that app forward.
+# so Fox Buddy's "Show me" can bring that app forward.
 HOOK_CMD = ("curl -s -m 1 -o /dev/null -H 'Content-Type: application/json' "
             "-H \"X-Term-App: ${__CFBundleIdentifier:-$TERM_PROGRAM}\" "
             "--data-binary @- http://127.0.0.1:47823/hook || true")
@@ -32,7 +32,7 @@ def ours(group):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config-dir", default="~/.claude", help="Claude Code config folder (default ~/.claude)")
-    ap.add_argument("--uninstall", action="store_true", help="remove Lump's hooks and status line")
+    ap.add_argument("--uninstall", action="store_true", help="remove Fox Buddy's hooks and status line")
     args = ap.parse_args()
 
     path = os.path.join(os.path.expanduser(args.config_dir), "settings.json")
@@ -79,7 +79,7 @@ def main():
             settings["statusLine"] = {"type": "command", "command": status_cmd}; changed.append("statusLine")
         elif line.get("command") != status_cmd:
             print(f"You already have a status line ({line.get('command')}), so it was left alone.\n"
-                  f"Lump's usage colour needs {status_cmd} to see the status line JSON: call it from yours.")
+                  f"The fox's usage colour needs {status_cmd} to see the status line JSON: call it from yours.")
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:

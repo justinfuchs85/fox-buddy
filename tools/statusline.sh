@@ -1,8 +1,8 @@
 #!/bin/bash
-# Claude Code status line for Desk Buddy.
+# Claude Code status line for Fox Buddy.
 # Claude Code runs this after each reply with session JSON on stdin; it includes your plan's usage
 # limits (rate_limits.five_hour / seven_day: used_percentage, resets_at). This forwards that JSON
-# to the bridge (which turns it into Lump's usage-gauge colour) and prints a short status line.
+# to the bridge (which turns it into the fox's usage-gauge colour) and prints a short status line.
 # Installed copy: ~/.desk-buddy/statusline.sh (referenced from ~/.claude/settings.json).
 input=$(cat)
 printf '%s' "$input" | curl -s -m 1 -o /dev/null -H 'Content-Type: application/json' \

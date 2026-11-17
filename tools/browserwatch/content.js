@@ -1,4 +1,4 @@
-// Lump for claude.ai: reads what Claude is doing in this tab and tells the extension's background worker.
+// Fox Buddy for claude.ai: reads what Claude is doing in this tab and tells the extension's background worker.
 //
 // The same raw signals tools/appwatch reads from the desktop app (claude.ai is the same web app), so the
 // bridge's rules (AppPages in tools/buddy_bridge.py) decide what they mean:

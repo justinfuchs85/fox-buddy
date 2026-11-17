@@ -1,6 +1,6 @@
-# Lump for claude.ai (Chrome and Safari extension)
+# Fox Buddy for claude.ai (Chrome and Safari extension)
 
-This lets Lump react to Claude in a Chrome tab: he works while a chat is responding, waves when
+This lets the fox react to Claude in a Chrome or Safari tab: he works while a chat is responding, waves when
 it needs your permission, and celebrates when it's done. It does the same job `tools/appwatch`
 does for the Claude desktop app, but for claude.ai in the browser.
 
@@ -16,7 +16,7 @@ wording, the fix goes in the bridge, not here.
 
 ## Install in Chrome
 
-1. Make sure the bridge is up to date. Run `zsh tools/desklump/build.sh` (it updates an installed
+1. Make sure the bridge is up to date. Run `zsh tools/foxbuddy/build.sh` (it updates an installed
    bridge) or `tools/install_bridge.sh`.
 2. In Chrome, open `chrome://extensions` and turn on **Developer mode** (top right).
 3. Click **Load unpacked** and pick this folder (`tools/browserwatch`).
@@ -46,7 +46,7 @@ Xcode (free from the App Store, not just the command line tools).
 - Chats show up as their own sessions (`web:...`), next to the desktop app's (`app:...`) and
   Claude Code's, and they all feed the same mood.
 - Looking at the tab counts as seeing the result, the same as having the chat open in the
-  desktop app. Lump stops sparkling about it once you do.
+  desktop app. The fox stops bugging you about it once you do.
 - After a few minutes in the background, Chrome slows a tab's timers to about once a minute.
   Page changes still get through, so a finished answer is usually noticed right away. At worst,
   it takes up to a minute.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Lump for claude.ai",
-  "description": "Tells the Desk Buddy bridge what Claude is doing in your claude.ai tabs, so Lump can react. Sends no message text.",
+  "name": "Fox Buddy for claude.ai",
+  "description": "Tells the Fox Buddy bridge what Claude is doing in your claude.ai tabs, so the fox can react. Sends no message text.",
   "version": "1.0",
   "icons": {
     "16": "icon16.png",

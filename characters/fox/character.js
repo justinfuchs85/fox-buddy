@@ -1,8 +1,7 @@
-// The fox as a Desktop Lump character: his moods, the moves between them, his fidgets and his gags.
+// The fox, Fox Buddy's character: his moods, the moves between them, his fidgets and his gags.
 //
 // Everything is a pose for the rig (rig.js). A sequence is a list of [drawing, ticks] at 24 ticks a second,
-// the same shape the desk Lump uses, so web/desktop.js plays him exactly the way it plays Lump, and the
-// bridge drives him with the same moods and events.
+// which web/desktop.js plays, and the bridge drives him with its moods and events.
 (() => {
   const F = window.__foxDraw, R = window.__foxRig;
   const { CREAM, INK, DARK, stroke, dot, trace, wob, part, oval } = F;
@@ -503,7 +502,7 @@
   });
 
   window.__character = {
-    // silent: his gags ask the bridge for no sounds (it only has Lump's, which would be the wrong ones)
+    // silent: his gags ask the bridge for no sounds
     name: 'fox', GAGS, silent: true, render, fxFor, D, LOOPS, TRANS, CLIPS, MOMENTS, meta,
     setTint: v => { F.tint = v; }, setLine: v => { F.line = v; }, setProp: () => {},
   };
