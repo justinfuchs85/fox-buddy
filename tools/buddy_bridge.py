@@ -112,6 +112,12 @@ HEARTBEAT_EVERY = 15
 NET_PORT = 4210                                    # the board's command port on Wi-Fi (tools/wifi_setup.py)
 STATE_FILE = os.path.join(HOME, "state.json")     # sessions etc. survive a bridge restart
 CLIPS_DIR = os.path.join(HOME, "clips")           # extra animations sent to him over Wi-Fi when asked for (<name>.clip)
+# Desktop Lump (tools/desklump): an app that draws him in a corner of the Mac's screen and listens on
+# 127.0.0.1:4210 like a board. config.json "desktop_lump": true makes the bridge talk to it first.
+# It draws every clip itself, so nothing is sent: it lists the clips it has in DESKTOP_CLIPS.
+DESKTOP_HOST = "127.0.0.1"
+DESKTOP_CLIPS = os.path.join(HOME, "desktop_clips.json")
+LINK = {"kind": None}                             # what the bridge is talking to now: "usb", "wifi", "desktop" or None
 # Clips he plays unprompted. These tables say what sets one off; a clip that isn't in CLIPS_DIR is
 # skipped. He plays at most one every CLIP_GAP seconds, none at night or at a meeting alarm, and while
 # something needs you only the "waiting" ones. config.json: "auto_clips": false turns all of it off.
@@ -183,8 +189,19 @@ def command_clip(cmd, worked, payload):
     return None
 
 
+def desktop_clips():
+    try:
+        with open(DESKTOP_CLIPS) as f:
+            return [n for n in json.load(f).get("clips", []) if re.fullmatch(r"[a-z0-9_]{1,40}", n)]
+    except Exception:
+        return []
+
+
 def clip_names():
-    return sorted(f[:-5] for f in (os.listdir(CLIPS_DIR) if os.path.isdir(CLIPS_DIR) else []) if re.fullmatch(r"[a-z0-9_]{1,40}\.clip", f))
+    names = {f[:-5] for f in (os.listdir(CLIPS_DIR) if os.path.isdir(CLIPS_DIR) else []) if re.fullmatch(r"[a-z0-9_]{1,40}\.clip", f)}
+    if LINK["kind"] == "desktop":
+        names |= set(desktop_clips())
+    return sorted(names)
 
 
 def read_config():
@@ -221,7 +238,8 @@ class Device:
             return [os.environ["DESKBUDDY_PORT"]]
         cfg = read_config()
         net = [f"socket://{cfg.get('lump_host') or 'lump.local'}:{NET_PORT}"] if cfg.get("lump_token") else []
-        return self.usb_ports() + net
+        desktop = [f"socket://{DESKTOP_HOST}:{NET_PORT}"] if cfg.get("desktop_lump") else []
+        return desktop + self.usb_ports() + net
 
     def _fail(self, p, e):
         msg = str(e)
@@ -247,13 +265,14 @@ class Device:
                                 try: sock.setsockopt(so.IPPROTO_TCP, getattr(so, opt), v)
                                 except OSError: pass
                     s.write(f"k {read_config().get('lump_token', '')}\n".encode())
-                    self.link = "wifi"
+                    self.link = "desktop" if ip == DESKTOP_HOST else "wifi"
                 else:
                     s = serial.Serial(); s.port, s.baudrate, s.timeout = p, 115200, 0.3
                     s.dtr = False; s.rts = False      # don't reset the board when opening
                     s.open()
                     self.link = "usb"
                 self._last_err.pop(p, None)
+                LINK["kind"] = self.link
                 log.info("connected to %s", p)
                 return s
             except Exception as e:
@@ -266,6 +285,7 @@ class Device:
             try: self.ser.close()
             except Exception: pass
             self.ser, self.link = None, None
+            LINK["kind"] = None
 
     def _run(self):
         buf, usb_checked = b"", 0.0
@@ -1244,6 +1264,10 @@ class Buddy:
 
     def send_clip(self, name, tap=False):
         """Give the board a clip over Wi-Fi (it keeps clips in RAM, so again after it restarts or the file changes)."""
+        if getattr(self.dev, "link", None) == "desktop":      # Desktop Lump draws every clip itself: just say which are tap reactions
+            if tap:
+                self.dev.send(f"t {name}", quiet=True)
+            return name in desktop_clips()
         path = os.path.join(CLIPS_DIR, name + ".clip")
         stamp = os.path.getmtime(path)
         if self.clips_sent.get(name) == stamp:

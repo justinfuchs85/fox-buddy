@@ -63,6 +63,16 @@ zsh tools/lumpbar/build.sh     # Builds and opens ~/Applications/Lump.app
 
 To start it at login, add `Lump.app` under **System Settings → General → Login Items**.
 
+### Lump on your desktop (no hardware)
+
+There's also a full-size Lump that lives in a corner of your screen, Clippy-style, with every mood, gag and clip. The bridge treats him as the board, so you don't need the display at all.
+
+```bash
+zsh tools/desklump/build.sh    # Builds and opens ~/Applications/Desktop Lump.app
+```
+
+Click him to tap, drag him to move, and right-click for size, look and the clip library. See [tools/desklump](tools/desklump/README.md).
+
 ## Make him do something new
 
 Open Claude Code in this repo and ask it to make Lump do something. “Make him juggle” is enough to get started. The `lump-clip` skill writes the clip, bakes it, and plays it on the display. Fast mode can get an idea onto the screen in about a minute. There’s also a mode that reviews every frame.

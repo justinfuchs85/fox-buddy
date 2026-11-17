@@ -726,3 +726,36 @@ class FocusAcrossAccounts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DesktopLumpTest(BridgeTest):
+    """Desktop Lump (tools/desklump): a board on 127.0.0.1 that draws every clip itself."""
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(HOME, "desktop_clips.json"), "w") as f:
+            json.dump({"clips": ["coffee", "juggle", "Bad Name"]}, f)
+        self.b.dev.link = "desktop"
+        p = mock.patch.dict(bridge.LINK, {"kind": "desktop"})
+        p.start(); self.addCleanup(p.stop)
+
+    def test_targets_desktop_first(self):
+        with open(os.path.join(HOME, "config.json"), "w") as f:
+            json.dump({"desktop_lump": True}, f)
+        with mock.patch.object(bridge.Device, "usb_ports", staticmethod(lambda: ["/dev/cu.usbmodem1"])):
+            self.assertEqual(bridge.Device._targets(bridge.Device), ["socket://127.0.0.1:4210", "/dev/cu.usbmodem1"])
+
+    def test_clip_names_include_desktop_clips_only_on_the_desktop(self):
+        self.assertEqual(bridge.clip_names(), ["coffee", "juggle"])
+        bridge.LINK["kind"] = "usb"
+        self.assertEqual(bridge.clip_names(), [])
+
+    def test_play_sends_nothing_but_the_event(self):
+        self.assertTrue(self.b.play("coffee"))
+        self.assertEqual(self.b.dev.sent, ["e coffee"])
+        self.assertIsNone(self.b.play("not_a_clip"))
+
+    def test_tap_clips_are_named_not_uploaded(self):
+        self.assertTrue(self.b.send_clip("juggle", tap=True))
+        self.assertEqual(self.b.dev.sent, ["t juggle"])
+        self.assertFalse(self.b.send_clip("missing"))
