@@ -15,6 +15,12 @@
   #card::after { content: ""; position: absolute; bottom: -9px; width: 18px; height: 18px; background: var(--bg); transform: rotate(45deg); border-radius: 0 0 4px 0; box-shadow: 3px 3px 5px rgba(0,0,0,.08); }
   #wrap.right #card::after { right: 34px; } #wrap.left #card::after { left: 34px; }
   #wrap.below #card::after { bottom: auto; top: -9px; border-radius: 4px 0 0 0; box-shadow: -2px -2px 4px rgba(0,0,0,.06); }
+  /* beside him: the tail points sideways, at him, near the bottom */
+  #wrap.beside { padding: 10px 18px 10px 12px; }
+  #wrap.beside.left { padding: 10px 12px 10px 18px; }
+  #wrap.beside #card::after { bottom: 40px; transform: rotate(-45deg); border-radius: 0 0 4px 0; }
+  #wrap.beside.right #card::after { right: -9px; left: auto; }
+  #wrap.beside.left #card::after { left: -9px; right: auto; transform: rotate(135deg); }
   #close { position: absolute; top: 6px; right: 8px; border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 2px 4px; line-height: 1; z-index: 2; }
   #close:hover { color: var(--ink); }
   #text { padding-right: 16px; word-wrap: break-word; }
@@ -30,7 +36,7 @@
 
   /* the chat */
   #chat { padding-top: 14px; }
-  #thread { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+  #thread { max-height: min(300px, calc(var(--room, 560px) - 200px)); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
   #thread:empty { display: none; }
   .msg { max-width: 92%; word-wrap: break-word; }
   .msg.you { align-self: flex-end; background: var(--you); border-radius: 12px 12px 4px 12px; padding: 6px 10px; white-space: pre-wrap; }
@@ -66,7 +72,7 @@
           <button class="link" id="newChat" title="Forget this conversation and start a new one">New chat</button>
           <button class="link" id="openClaude" title="Carry this conversation into a new Claude Desktop chat">Open in Claude</button>
         </div>
-        <div class="hint">Return to send · Shift-Return for a new line · ⌘-Return to open in Claude</div>
+        <div class="hint">Return sends · ⌘-Return opens in Claude</div>
       </div>
     </div>
   </div>
@@ -129,7 +135,10 @@
   function openInClaude(extra) { const t = transcript(extra); if (t) post({ open: t }); }
 
   window.bubble = {
-    place(side, below) { $('wrap').className = (side === 'left' ? 'left' : 'right') + (below ? ' below' : ''); report(); },
+    place(side, spot, room) {                     // spot: above | below | beside him; room: how tall it can be there
+      $('wrap').className = (side === 'left' ? 'left' : 'right') + (spot === 'below' ? ' below' : spot === 'beside' ? ' beside' : '');
+      if (room) document.documentElement.style.setProperty('--room', Math.max(220, room) + 'px');
+      report(); scrollDown(); },
     show(m) {                                       // a line about what Claude is doing: { text, kind, jump }
       $('card').className = m.kind === 'needs' ? 'needs' : m.kind === 'done' ? 'done' : '';
       $('text').innerHTML = inline(m.text || '');

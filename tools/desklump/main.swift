@@ -285,6 +285,11 @@ final class Asker {
     }
 }
 
+/// The bubble's window level: one above his, so he never covers it.
+let BUBBLE_LEVEL = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+/// The tallest the bubble gets (its thread scrolls inside).
+let BUBBLE_MAX_H: CGFloat = 560
+
 /// TERM_PROGRAM names (what the hook sends when there's no bundle id) to the apps they mean.
 let TERMINAL_APPS: [String: String] = [
     "Apple_Terminal": "com.apple.Terminal", "iTerm.app": "com.googlecode.iterm2", "vscode": "com.microsoft.VSCode",
@@ -433,7 +438,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func applyLayer() {
         // On the desktop: just above the desktop icons, so ordinary windows cover him like they'd cover a widget.
         panel.level = onDesktop ? NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1) : .floating
-        bubble?.level = .floating                // his bubble always floats, even when he sits on the desktop
+        bubble?.level = BUBBLE_LEVEL             // his bubble always floats, above him, even when he sits on the desktop
     }
 
     func visibleFrame(for point: NSPoint? = nil) -> NSRect {
@@ -632,7 +637,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "bubble")
         if let rules = offlineRules { config.userContentController.add(rules) }
-        bubble = BubblePanel(contentRect: NSRect(origin: .zero, size: NSSize(width: 324, height: 420)),
+        bubble = BubblePanel(contentRect: NSRect(origin: .zero, size: NSSize(width: 324, height: BUBBLE_MAX_H)),
                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         bubble.isOpaque = false
         bubble.backgroundColor = .clear
@@ -640,8 +645,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         bubble.hidesOnDeactivate = false
         bubble.isReleasedWhenClosed = false
         bubble.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
-        bubble.level = .floating
-        bubbleWeb = WKWebView(frame: NSRect(x: 0, y: 0, width: 324, height: 420), configuration: config)
+        bubble.level = BUBBLE_LEVEL
+        bubbleWeb = WKWebView(frame: NSRect(x: 0, y: 0, width: 324, height: BUBBLE_MAX_H), configuration: config)
         bubbleWeb.autoresizingMask = [.width, .height]
         bubbleWeb.setValue(false, forKey: "drawsBackground")
         if #available(macOS 12.0, *) { bubbleWeb.underPageBackgroundColor = .clear }
@@ -694,25 +699,33 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         bubble?.orderOut(nil)
     }
 
-    /// Beside him, towards the middle of the screen, above him if there's room (else below).
+    /// Where his bubble goes: above him if it fits, else below him, else beside him (towards the middle of
+    /// the screen), and never over him. The thread inside scrolls to fit the room there is.
     func placeBubble() {
         guard let bubble = bubble, let panel = panel else { return }
-        let f = panel.frame, vf = visibleFrame(), w = bubbleSize.width, h = bubbleSize.height
+        let f = panel.frame, vf = visibleFrame(), w = bubbleSize.width
         let right = f.midX > vf.midX
-        var x = right ? f.maxX - w + 10 : f.minX - 10
+        let roomAbove = vf.maxY - (f.maxY - 10), roomBelow = (f.minY + 10) - vf.minY, roomBeside = vf.height - 8
+        let h = bubbleSize.height
+        var x: CGFloat, y: CGFloat, spot: String
+        if h <= roomAbove { spot = "above"; y = f.maxY - 10 }
+        else if h <= roomBelow { spot = "below"; y = f.minY + 10 - h }
+        else { spot = "beside"; y = f.minY }
+        if spot == "beside" { x = right ? f.minX - w + 16 : f.maxX - 16 }
+        else { x = right ? f.maxX - w + 10 : f.minX - 10 }
         x = min(max(x, vf.minX + 4), vf.maxX - w - 4)
-        var y = f.maxY - 14, below = false
-        if y + h > vf.maxY { y = f.minY - h + 14; below = true }
         y = min(max(y, vf.minY + 4), vf.maxY - h - 4)
         bubble.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
-        let place = "\(right ? "right" : "left") \(below)"
-        if place != bubblePlaced { bubblePlaced = place; bubbleJS("bubble.place('\(right ? "right" : "left")', \(below))") }
+        // tell the page which way the tail points and how tall it may grow here
+        let room = Int(spot == "above" ? roomAbove : spot == "below" ? roomBelow : roomBeside)
+        let place = "\(right ? "right" : "left") \(spot) \(room)"
+        if place != bubblePlaced { bubblePlaced = place; bubbleJS("bubble.place('\(right ? "right" : "left")', '\(spot)', \(min(room, Int(BUBBLE_MAX_H))))") }
     }
 
     func fromBubble(_ body: [String: Any]) {
         if let size = body["size"] as? [String: Any], let w = (size["w"] as? NSNumber)?.doubleValue, let h = (size["h"] as? NSNumber)?.doubleValue {
             if !bubbleReady { bubbleReady = true; bubbleQueue.forEach { bubbleWeb.evaluateJavaScript($0, completionHandler: nil) }; bubbleQueue.removeAll() }
-            bubbleSize = NSSize(width: max(200, min(w, 420)), height: max(40, min(h, 420)))
+            bubbleSize = NSSize(width: max(200, min(w, 420)), height: max(40, min(h, BUBBLE_MAX_H)))
             if bubble.isVisible { placeBubble() }
         }
         if let action = body["action"] as? String {
