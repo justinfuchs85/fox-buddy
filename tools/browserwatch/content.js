@@ -9,6 +9,7 @@
 // never the chat's title (titles can be personal, and the bridge logs session names): a chat is named
 // by the first 8 characters of the ID in its address instead ("chat 1a2b3c4d").
 (() => {
+  const api = globalThis.browser || chrome;      // Safari (and Firefox) have `browser`; Chrome has `chrome`
   // Only what the bridge acts on (AppPages.STOP_BTN, NEEDS_BTN, WORK_STATUS, NEEDS_TEXT), so nothing
   // else on the page, not even a stray phrase from a message, is ever sent.
   const BUTTON = /^stop (response|generating)$|\b(allow|approve|deny|don.?t allow|reject|decline)\b/i;
@@ -49,7 +50,8 @@
 
   let last = '', lastSent = 0, lastRead = 0, trailing = 0;
   function send(msg) {
-    try { chrome.runtime.sendMessage(msg).catch(() => {}); } catch (e) { stop(); }   // extension reloaded: this copy is orphaned
+    try { const p = api.runtime.sendMessage(msg); if (p && p.catch) p.catch(() => {}); }
+    catch (e) { stop(); }                                                    // extension reloaded: this copy is orphaned
   }
   function check() {
     lastRead = Date.now();

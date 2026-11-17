@@ -820,7 +820,9 @@ class RequestGuardTest(unittest.TestCase):
 
     def test_the_extension_only_reaches_browser(self):
         self.assertTrue(self.allowed("/browser", origin="chrome-extension://abc"))
+        self.assertTrue(self.allowed("/browser", origin="safari-web-extension://ABC-123"))
         self.assertFalse(self.allowed("/hook", origin="chrome-extension://abc"))
+        self.assertFalse(self.allowed("/hook", origin="safari-web-extension://ABC-123"))
 
     def test_sound_names_are_never_paths(self):
         s = bridge.Sounds.__new__(bridge.Sounds)

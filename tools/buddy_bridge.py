@@ -1665,7 +1665,8 @@ buddy = None
 # requests there (or, with DNS rebinding, read the answers), so:
 #   Host must be this machine by name (a rebinding attack arrives with its own domain in Host);
 #   requests a browser makes carry an Origin header, and only the Lump for claude.ai extension
-#   (tools/browserwatch, origin chrome-extension://...) is let in, and only to /browser.
+#   (tools/browserwatch: chrome-extension://... in Chrome, safari-web-extension://... in Safari)
+#   is let in, and only to /browser.
 # Hooks, the status line, the app watcher and Desktop Lump send no Origin, so they're unaffected.
 ALLOWED_HOSTS = {f"127.0.0.1:{HTTP_PORT}", f"localhost:{HTTP_PORT}", "127.0.0.1", "localhost"}
 MAX_BODY = 2_000_000                    # hook payloads can carry a big tool result; nothing legitimate is bigger
@@ -1680,7 +1681,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if (self.headers.get("Host") or "").strip().lower() not in ALLOWED_HOSTS:
             return False
         origin = self.headers.get("Origin")
-        return origin is None or (origin.startswith("chrome-extension://") and self.path == "/browser")
+        return origin is None or (origin.startswith(("chrome-extension://", "safari-web-extension://")) and self.path == "/browser")
 
     def _reply(self, code, body=b"", ctype="text/plain"):
         self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)

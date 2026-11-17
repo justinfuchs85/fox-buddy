@@ -6,6 +6,8 @@
 # Runtime lives in ~/.desk-buddy (outside iCloud, so it's never evicted):
 #   venv/  bridge.py  bridge.log  deskbuddy-appwatch
 # Uninstall: tools/install_bridge.sh --uninstall
+# Skip the app watcher (you use claude.ai in a browser, not the desktop app, so it would only ask for
+# Accessibility): tools/install_bridge.sh --no-appwatch. It also removes one installed earlier.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RT="$HOME/.desk-buddy"
@@ -14,6 +16,7 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 WLABEL="com.deskbuddy.appwatch"
 WPLIST="$HOME/Library/LaunchAgents/$WLABEL.plist"
 
+NO_APPWATCH=0; [ "${1:-}" = "--no-appwatch" ] && NO_APPWATCH=1
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootout "gui/$(id -u)/$WLABEL" 2>/dev/null || true
 if [ "${1:-}" = "--uninstall" ]; then
@@ -23,6 +26,7 @@ if [ "${1:-}" = "--uninstall" ]; then
 fi
 
 mkdir -p "$RT" "$HOME/Library/LaunchAgents"
+chmod 700 "$RT"
 [ -x "$RT/venv/bin/python" ] || python3 -m venv "$RT/venv"
 "$RT/venv/bin/pip" -q install --disable-pip-version-check --upgrade pip
 "$RT/venv/bin/pip" -q install --disable-pip-version-check pyserial icalendar recurring-ical-events
@@ -47,6 +51,13 @@ cat > "$PLIST" <<EOF
 </dict></plist>
 EOF
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
+
+if [ "$NO_APPWATCH" = 1 ]; then
+  rm -f "$WPLIST"
+  sleep 3
+  curl -s -m 2 http://127.0.0.1:47823/status >/dev/null && echo "Bridge running (no app watcher: use the browser extension, tools/browserwatch)."
+  exit 0
+fi
 
 # Build the app watcher. macOS ties its Accessibility permission to the signature. If Claude Switcher's
 # local signing certificate exists (its build.sh makes one), sign with that: every build then keeps the

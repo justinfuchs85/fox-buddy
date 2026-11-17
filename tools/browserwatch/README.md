@@ -1,4 +1,4 @@
-# Lump for claude.ai (Chrome extension)
+# Lump for claude.ai (Chrome and Safari extension)
 
 This lets Lump react to Claude in a Chrome tab: he works while a chat is responding, waves when
 it needs your permission, and celebrates when it's done. It does the same job `tools/appwatch`
@@ -14,7 +14,7 @@ message text, and nothing leaves your computer. The bridge's existing rules deci
 what the labels mean (`AppPages` in `tools/buddy_bridge.py`), so if claude.ai changes its
 wording, the fix goes in the bridge, not here.
 
-## Install
+## Install in Chrome
 
 1. Make sure the bridge is up to date. Run `zsh tools/desklump/build.sh` (it updates an installed
    bridge) or `tools/install_bridge.sh`.
@@ -25,7 +25,23 @@ wording, the fix goes in the bridge, not here.
 To check it's working, run `curl -s 127.0.0.1:47823/status`. While a claude.ai tab is open, it
 shows a recent `browser_watcher` report and `web:chat <id>` sessions.
 
-## Notes
+## Install in Safari
+
+The same folder works in Safari 18.4 or later, with no Xcode needed. The catch is that Safari
+treats an extension loaded this way as temporary: it removes it when you quit Safari, or after
+24 hours.
+
+1. Make sure the bridge is up to date (see step 1 above).
+2. **Safari → Settings → Advanced**: turn on **Show features for web developers**.
+3. **Safari → Settings → Developer**: click **Add Temporary Extension…** and pick this folder
+   (`tools/browserwatch`). Approve the prompt about unsigned extensions.
+4. Safari asks what the extension may access. Allow it on **claude.ai**. If Safari asks about
+   **127.0.0.1**, allow that too: it's the bridge on this Mac.
+5. Reload any claude.ai tabs.
+
+To keep it installed for good, Safari needs it wrapped in a small Mac app, built with the full
+Xcode (free from the App Store, not just the command line tools).
+
 
 - Chats show up as their own sessions (`web:...`), next to the desktop app's (`app:...`) and
   Claude Code's, and they all feed the same mood.

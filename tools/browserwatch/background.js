@@ -2,16 +2,18 @@
 // Desk Buddy bridge (POST http://127.0.0.1:47823/browser), in the shape tools/appwatch sends for
 // the desktop app. Each report replaces the last, so a tab that's gone simply isn't in it.
 //
-// Chrome stops this worker when it's idle, so the tab list lives in chrome.storage.session
+// The browser stops this worker when it's idle, so the tab list lives in storage.session
 // (kept until the browser quits), not just in memory.
+const api = globalThis.browser || chrome;        // Safari (and Firefox) have `browser`; Chrome has `chrome`
 const BRIDGE = 'http://127.0.0.1:47823/browser';
 // A tab that hasn't reported for this long (navigated away, crashed) is dropped. Generous, because
 // Chrome slows the timers of tabs that have been in the background a while to about once a minute.
 const STALE_MS = 150000;
 
 let tabs = null;                 // tab id -> { title, page, focused, t }
-const loaded = chrome.storage.session.get('tabs').then(r => { tabs = new Map(Object.entries(r.tabs || {})); });
-const save = () => chrome.storage.session.set({ tabs: Object.fromEntries(tabs) });
+const loaded = Promise.resolve(api.storage.session.get('tabs')).then(r => { tabs = new Map(Object.entries((r && r.tabs) || {})); },
+                                                                 () => { tabs = new Map(); });
+const save = () => { try { const p = api.storage.session.set({ tabs: Object.fromEntries(tabs) }); if (p && p.catch) p.catch(() => {}); } catch (e) {} };
 
 function report() {
   const now = Date.now(), pages = {}, focused = [];
@@ -26,7 +28,7 @@ function report() {
   fetch(BRIDGE, { method: 'POST', body, headers: { 'Content-Type': 'application/json' } }).catch(() => {});   // bridge not running: fine
 }
 
-chrome.runtime.onMessage.addListener((msg, sender) => {
+api.runtime.onMessage.addListener((msg, sender) => {
   const id = sender.tab && sender.tab.id;
   if (id === undefined) return;
   loaded.then(() => {
@@ -35,8 +37,8 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     report();
   });
 });
-chrome.tabs.onRemoved.addListener(id => loaded.then(() => { if (tabs.delete(String(id))) report(); }));
+api.tabs.onRemoved.addListener(id => loaded.then(() => { if (tabs.delete(String(id))) report(); }));
 
 // Woken by tab reports; this sweep catches the last claude.ai tab going quiet without saying goodbye.
-chrome.alarms.create('sweep', { periodInMinutes: 0.5 });
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'sweep') loaded.then(report); });
+api.alarms.create('sweep', { periodInMinutes: 0.5 });      // (Safari may stretch this to a minute: fine)
+api.alarms.onAlarm.addListener(a => { if (a.name === 'sweep') loaded.then(report); });

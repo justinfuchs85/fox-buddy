@@ -28,6 +28,7 @@ Do this once, from the top of the repo:
 
 ```bash
 tools/install_bridge.sh            # the bridge and the Chat/Cowork watcher, as login items
+                                   # (add --no-appwatch if you use claude.ai in a browser instead)
 python3 tools/install_hooks.py     # Claude Code's hooks and status line
 ```
 
@@ -39,7 +40,7 @@ The Chat/Cowork watcher needs Accessibility permission (**System Settings → Pr
 Accessibility → deskbuddy-appwatch**). Calendar, Slack and sound settings are the same as for the
 desk Lump: see the main README.
 
-Using claude.ai in Chrome instead of the desktop app? Load the extension in
+Using claude.ai in Chrome or Safari instead of the desktop app? Load the extension in
 [`tools/browserwatch`](../browserwatch/README.md) and he reacts to browser chats too.
 
 ## Using him
