@@ -52,6 +52,11 @@ Using claude.ai in Chrome or Safari instead of the desktop app? Load the extensi
   there, with **Copy** and **Ask another**. It's answered by Claude Code in print mode (`claude -p`)
   with every tool switched off, so it can only reply, never run anything or touch your files. It
   needs Claude Code installed, counts towards your Claude usage, and isn't saved to your history.
+  For bigger questions, click **Open in Claude** (or press ⌘-Return). That opens a new chat in
+  Claude Desktop with your question already filled in, ready for you to send. It uses Claude's
+  `claude://claude.ai/new?q=` link, and falls back to claude.ai in your browser if Claude Desktop
+  isn't installed. The same button appears while he's thinking ("Taking a while?") and under an
+  answer ("Continue in Claude").
 - **His speech bubble** says what Claude is doing: "desk-buddy: Running `npm test`", "needs your
   permission to use Bash", and "done: …" with the first line of Claude's reply. Click **Show me** to
   bring that session forward. For Claude Code that's the terminal app it runs in (iTerm, Terminal,

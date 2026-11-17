@@ -25,7 +25,7 @@
   code { background: var(--code); border-radius: 4px; padding: 0 4px; font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; }
   pre { background: var(--code); border-radius: 8px; padding: 8px 10px; overflow-x: auto; margin: 0 0 8px; }
   pre code { background: none; padding: 0; }
-  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   button.act { border: 0; border-radius: 8px; padding: 6px 12px; font: 600 12.5px -apple-system, sans-serif; cursor: pointer; background: var(--code); color: var(--ink); }
   button.act.primary { background: var(--accent); color: #fff; }
   button.act:hover { filter: brightness(1.05); }
@@ -45,14 +45,15 @@
     <div id="say"><div id="text"></div><div class="actions" id="sayActions" hidden><button class="act primary" id="jump">Show me</button></div></div>
     <div id="askBox" hidden>
       <textarea id="input" placeholder="Ask the fox anything…" rows="2"></textarea>
-      <div class="actions"><button class="act primary" id="send">Ask</button></div>
-      <div class="hint">Return to ask · Shift-Return for a new line · Esc to close</div>
+      <div class="actions"><button class="act primary" id="send">Ask</button><button class="act" id="openNew" title="A new chat in Claude Desktop, with your question filled in">Open in Claude</button></div>
+      <div class="hint">Return to ask here · ⌘-Return to open in Claude · Esc to close</div>
     </div>
     <div id="answerBox" hidden>
       <div id="q"></div>
-      <div id="thinking" class="dots" hidden><span></span><span></span><span></span></div>
+      <div id="thinking" hidden><span class="dots"><span></span><span></span><span></span></span>
+        <div class="actions"><button class="act" id="openWait">Taking a while? Open in Claude</button></div></div>
       <div id="answer"></div>
-      <div class="actions" id="answerActions" hidden><button class="act" id="copy">Copy</button><button class="act primary" id="again">Ask another</button></div>
+      <div class="actions" id="answerActions" hidden><button class="act" id="copy">Copy</button><button class="act" id="openAfter">Continue in Claude</button><button class="act primary" id="again">Ask another</button></div>
     </div>
   </div>
 </div>
@@ -60,7 +61,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const post = m => { try { window.webkit.messageHandlers.bubble.postMessage(m); } catch (e) { (window.__posted = window.__posted || []).push(m); } };
-  let ttlTimer = 0, hovering = false, lastAnswer = '';
+  let ttlTimer = 0, hovering = false, lastAnswer = '', lastQuestion = '';
 
   // Everything shown comes from outside (a command, Claude's reply): it is always treated as text.
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -104,17 +105,23 @@
       timeout(m.kind === 'needs' ? 0 : m.kind === 'done' ? 14 : 6);
     },
     ask() { clearTimeout(ttlTimer); $('card').className = ''; $('input').value = ''; mode('ask'); setTimeout(() => $('input').focus(), 30); },
-    thinking(q) { clearTimeout(ttlTimer); $('card').className = ''; $('q').textContent = q; $('answer').innerHTML = ''; $('thinking').hidden = false; $('answerActions').hidden = true; mode('answer'); },
-    answer(q, text) { lastAnswer = text; $('copy').hidden = false; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = markdown(text); $('answerActions').hidden = false; mode('answer'); },
-    error(q, text) { lastAnswer = ''; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = markdown(text); $('answerActions').hidden = false; $('copy').hidden = true; mode('answer'); },
+    thinking(q) { lastQuestion = q; clearTimeout(ttlTimer); $('card').className = ''; $('q').textContent = q; $('answer').innerHTML = ''; $('thinking').hidden = false; $('answerActions').hidden = true; mode('answer'); },
+    answer(q, text) { lastQuestion = q; lastAnswer = text; $('copy').hidden = false; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = markdown(text); $('answerActions').hidden = false; mode('answer'); },
+    error(q, text) { lastQuestion = q; lastAnswer = ''; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = markdown(text); $('answerActions').hidden = false; $('copy').hidden = true; mode('answer'); },
   };
   $('close').onclick = () => post({ action: 'dismiss' });
   $('jump').onclick = () => post({ action: 'jump' });
   $('copy').onclick = () => { post({ copy: lastAnswer }); $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy', 1200); };
   $('again').onclick = () => { $('copy').hidden = false; window.bubble.ask(); };
   const send = () => { const q = $('input').value.trim(); if (q) post({ ask: q.slice(0, 4000) }); };
+  // the bigger jobs: a new chat in Claude Desktop with the question filled in (you review and send it there)
+  const openInClaude = q => { q = (q || '').trim(); if (q) post({ open: q.slice(0, 14000) }); };
+  $('openNew').onclick = () => openInClaude($('input').value);
+  $('openWait').onclick = () => openInClaude(lastQuestion);
+  $('openAfter').onclick = () => openInClaude(lastQuestion);
   $('send').onclick = send;
   $('input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); openInClaude($('input').value); return; }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     if (e.key === 'Escape') { e.stopPropagation(); post({ action: 'dismiss' }); }
   });

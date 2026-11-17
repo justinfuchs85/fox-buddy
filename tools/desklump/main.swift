@@ -721,8 +721,25 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
                                  : "bubble.error(\(self.jsonLiteral(question)), \(self.jsonLiteral(text)))")
             }
         }
+        if let q = body["open"] as? String, !q.isEmpty {
+            openInClaude(q)
+            hideBubble()                                  // (and stops any quick answer still thinking)
+        }
         if let text = body["copy"] as? String, !text.isEmpty {
             NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    /// A new chat in Claude Desktop with the question filled in, for you to check and send (claude://claude.ai/new?q=…).
+    /// Without Claude Desktop, the same in claude.ai in your browser.
+    func openInClaude(_ question: String) {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=?#")
+        let q = String(question.prefix(14000)).addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+        if let app = URL(string: "claude://claude.ai/new?q=" + q), NSWorkspace.shared.urlForApplication(toOpen: app) != nil {
+            NSWorkspace.shared.open(app)
+        } else if let web = URL(string: "https://claude.ai/new?q=" + q) {
+            NSWorkspace.shared.open(web)
         }
     }
 
