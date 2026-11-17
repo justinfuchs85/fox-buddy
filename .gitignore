@@ -1,0 +1,44 @@
+# build output / environments
+firmware/.pio/
+tools/.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+
+# regenerable from the .scad sources (openscad -D 'part="..."')
+enclosure/stl/
+
+# vendor's factory firmware dump: keep locally, never publish
+backups/
+
+# the moss planter stays a local experiment; only the monitor mount is published
+enclosure/lump_planter.scad
+enclosure/previews/round.png
+enclosure/previews/box.png
+enclosure/previews/section.png
+enclosure/previews/back_notch.png
+
+# regenerable from the clip scripts (tools/export_frames.py --clip <name> --sheet ...)
+design/clips/previews/
+
+# working notes between Claude sessions: local only
+HANDOFF.md
+
+# Reddit/launch drafts and media: local only
+promo/
+
+# regenerable from design/device/build_device.py and make_animatic.py: the Blender scene, renders and video drafts
+design/device/animatic/
+*.blend
+*.blend1
+design/device/*.mp4
+design/device/*.png
+!design/device/screen_test.png
+
+# the video soundtrack: local only
+design/device/music/
+
+# built by tools/build_gallery.py (the page itself, gallery/index.html, is kept)
+gallery/clips/
+gallery/lump.bin
+gallery/manifest.json
