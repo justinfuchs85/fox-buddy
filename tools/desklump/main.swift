@@ -193,11 +193,15 @@ final class BubblePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// Answers a quick question with Claude Code in print mode (claude -p), with every tool switched off:
-/// it can only reply, never run a command or touch a file. It runs in ~/.desk-buddy/ask, which the
-/// bridge knows not to narrate, and nothing is saved to your session history.
+/// Chats with Claude Code in print mode (claude -p), with every tool switched off: it can only reply,
+/// never run a command or touch a file. The first message starts a conversation with an id we choose
+/// (--session-id); every message after continues it (--resume), until "New chat". Conversations are
+/// kept by Claude Code under ~/.desk-buddy/ask (their own folder, so they stay out of your projects'
+/// histories), which the bridge knows not to narrate.
 final class Asker {
     private var running: Process?
+    private var session: String?          // the conversation so far (nil: the next message starts one)
+    func reset() { cancel(); session = nil }
     private lazy var claudePath: String? = Asker.findClaude()
 
     static func findClaude() -> String? {
@@ -224,9 +228,10 @@ final class Asker {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/ask")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let p = Process(), out = Pipe(), err = Pipe()
+        let resuming = session != nil, id = session ?? UUID().uuidString.lowercased()
         p.executableURL = URL(fileURLWithPath: claude)
-        p.arguments = ["-p", question, "--tools", "", "--no-session-persistence", "--output-format", "text",
-                       "--append-system-prompt", "Your answer appears in a small speech bubble beside a cartoon fox on the user's desktop. Answer directly and briefly: a few sentences or a short list, under 150 words, unless they ask for more."]
+        p.arguments = ["-p", question, "--tools", "", "--output-format", "text"] + (resuming ? ["--resume", id] : ["--session-id", id]) +
+                      ["--append-system-prompt", "You're chatting through a small speech bubble beside a cartoon fox on the user's desktop. Keep replies short and conversational: a few sentences or a short list, under 150 words, unless they ask for more."]
         p.currentDirectoryURL = dir
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = (env["PATH"] ?? "/usr/bin:/bin") + ":/opt/homebrew/bin:/usr/local/bin"
@@ -255,12 +260,16 @@ final class Asker {
                 // (Claude Code's launcher can turn the stop signal into exit code 143, so go by why we stopped it)
                 if timedOut { done("Claude Code hadn't answered after 2 minutes, so I stopped it. It may be stuck: try the same question in Terminal with `claude -p \"…\"` to see what it's waiting for.", false) }
                 else if p.terminationReason == .uncaughtSignal || p.terminationStatus == 143 { done("Claude Code was stopped before it answered.", false) }
-                else if p.terminationStatus == 0 && !text.isEmpty { done(text, true) }
+                else if p.terminationStatus == 0 && !text.isEmpty { self.session = id; done(text, true) }
                 else {
                     // In print mode Claude Code reports most problems on stdout ("Invalid API key · Please run /login"),
                     // so show whichever stream says something, and add the fix for the usual one.
                     let said = [problem, text].first { !$0.isEmpty } ?? ""
                     var msg = said.isEmpty ? "Claude Code didn't answer (it exited with \(p.terminationStatus))." : String(said.prefix(300))
+                    if resuming && said.lowercased().contains("no conversation found") {
+                        self.session = nil                        // the conversation's gone: the next message starts a new one
+                        msg += "\n\nThat conversation is gone, so your next message starts a new one."
+                    }
                     if said.lowercased().contains("login") || said.lowercased().contains("api key") || said.lowercased().contains("auth") {
                         msg += "\n\nTo fix it, open Terminal, run `claude`, and type `/login` to sign in."
                     }
@@ -302,7 +311,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     var bubbleReady = false
     var bubbleQueue: [String] = []
     var bubbleSize = NSSize(width: 324, height: 90)
-    var bubbleMode = "none"             // none | say | ask | answer
+    var bubbleMode = "none"             // none | say (a line about Claude) | chat (talking with him)
     var bubbleJump: [String: Any]?
     var bubbleKind = ""                 // what the bubble is saying now: working | needs | done | info
     var bubblePlaced = ""
@@ -659,7 +668,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             if bubbleMode == "say" && bubbleKind == "needs" { hideBubble() }      // Claude's moving again: that's been dealt with
             return
         }
-        if bubbleMode == "ask" || bubbleMode == "answer" || hiddenByUser || bubble == nil { return }   // you're busy with him: don't interrupt
+        if bubbleMode == "chat" || hiddenByUser || bubble == nil { return }   // you're talking with him: don't interrupt
         bubbleJump = n["jump"] as? [String: Any]
         bubbleKind = kind
         bubbleMode = "say"
@@ -670,8 +679,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     func openAsk() {
         guard bubble != nil else { return }
-        bubbleMode = "ask"; bubbleJump = nil
-        bubbleJS("bubble.ask()")
+        bubbleMode = "chat"; bubbleJump = nil
+        bubbleJS("bubble.chat()")
         showBubble(key: true)
     }
 
@@ -681,8 +690,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
 
     func hideBubble() {
-        if bubbleMode == "answer" { asker.cancel() }
-        bubbleMode = "none"; bubbleJump = nil
+        bubbleMode = "none"; bubbleJump = nil          // (a reply still on its way pops the chat back open)
         bubble?.orderOut(nil)
     }
 
@@ -712,18 +720,24 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             if action == "dismiss" || action == "jump" { hideBubble() }
         }
         if let q = body["ask"] as? String, !q.isEmpty {
-            bubbleMode = "answer"
             let question = String(q.prefix(4000))
             bubbleJS("bubble.thinking(\(jsonLiteral(question)))")
             asker.ask(question) { [weak self] text, ok in
-                guard let self = self, self.bubbleMode == "answer" else { return }     // dismissed while thinking
-                self.bubbleJS(ok ? "bubble.answer(\(self.jsonLiteral(question)), \(self.jsonLiteral(text)))"
-                                 : "bubble.error(\(self.jsonLiteral(question)), \(self.jsonLiteral(text)))")
+                guard let self = self else { return }
+                self.bubbleJS(ok ? "bubble.answer(\(self.jsonLiteral(text)))" : "bubble.error(\(self.jsonLiteral(text)))")
+                if self.bubbleMode != "chat" && !self.hiddenByUser {          // closed it while he was thinking: show the reply
+                    self.bubbleMode = "chat"; self.bubbleJump = nil
+                    self.bubbleJS("bubble.chat(false)")
+                    self.showBubble(key: false)
+                }
             }
         }
+        if body["newChat"] as? Bool == true { asker.reset() }
         if let q = body["open"] as? String, !q.isEmpty {
+            asker.cancel()                                // any reply still on its way: Claude Desktop has it now
+            bubbleJS("bubble.stopped('Carried on in Claude Desktop.')")
             openInClaude(q)
-            hideBubble()                                  // (and stops any quick answer still thinking)
+            hideBubble()
         }
         if let text = body["copy"] as? String, !text.isEmpty {
             NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)

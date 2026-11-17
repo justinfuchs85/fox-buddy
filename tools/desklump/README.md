@@ -48,15 +48,19 @@ Using claude.ai in Chrome or Safari instead of the desktop app? Load the extensi
 - **Click** him to tap the glass. You get a gag. If Claude needs you, it snoozes the nagging. If
   there are unread results, it marks them read. If a meeting alarm is going, it silences it.
 - **Drag** him anywhere. By default he snaps into the nearest corner when you let go.
-- **Double-click** him to ask a question. You type it in his speech bubble and the answer shows up
-  there, with **Copy** and **Ask another**. It's answered by Claude Code in print mode (`claude -p`)
-  with every tool switched off, so it can only reply, never run anything or touch your files. It
-  needs Claude Code installed, counts towards your Claude usage, and isn't saved to your history.
-  For bigger questions, click **Open in Claude** (or press ⌘-Return). That opens a new chat in
-  Claude Desktop with your question already filled in, ready for you to send. It uses Claude's
-  `claude://claude.ai/new?q=` link, and falls back to claude.ai in your browser if Claude Desktop
-  isn't installed. The same button appears while he's thinking ("Taking a while?") and under an
-  answer ("Continue in Claude").
+- **Double-click** him to chat. His bubble becomes a little chat window: your messages on the right,
+  his replies on the left, each with **Copy**. Follow-ups continue the same conversation until you
+  click **New chat**. If you close the bubble while he's thinking, the reply pops it back open.
+  Replies come from Claude Code in print mode with every tool switched off (`claude -p --tools ""`),
+  so he can only talk, never run anything or touch your files. Each message continues the
+  conversation (`--session-id`, then `--resume`). Claude Code keeps these conversations in
+  `~/.desk-buddy/ask`, apart from your projects. Chatting needs Claude Code installed and signed in,
+  and counts towards your Claude usage.
+
+  For bigger jobs, click **Open in Claude** (or press ⌘-Return). That opens a new chat in Claude
+  Desktop with the whole conversation so far filled in, plus anything you'd typed, ready for you to
+  send. It uses Claude's `claude://claude.ai/new?q=` link, and falls back to claude.ai in your
+  browser without Claude Desktop. The same link appears while he's thinking ("Taking a while?").
 - **His speech bubble** says what Claude is doing: "desk-buddy: Running `npm test`", "needs your
   permission to use Bash", and "done: …" with the first line of Claude's reply. Click **Show me** to
   bring that session forward. For Claude Code that's the terminal app it runs in (iTerm, Terminal,
