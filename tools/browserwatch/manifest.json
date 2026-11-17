@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Lump for claude.ai",
+  "description": "Tells the Desk Buddy bridge what Claude is doing in your claude.ai tabs, so Lump can react. Sends no message text.",
+  "version": "1.0",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:47823/*"
+  ],
+  "permissions": [
+    "alarms",
+    "storage"
+  ]
+}

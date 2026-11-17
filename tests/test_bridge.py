@@ -759,3 +759,40 @@ class DesktopLumpTest(BridgeTest):
         self.assertTrue(self.b.send_clip("juggle", tap=True))
         self.assertEqual(self.b.dev.sent, ["t juggle"])
         self.assertFalse(self.b.send_clip("missing"))
+
+
+class BrowserWatchTest(BridgeTest):
+    """claude.ai in Chrome (tools/browserwatch): its own reports, kept apart from the desktop app's."""
+
+    def setUp(self):
+        super().setUp()
+        self.b.app = bridge.AppPages(self.b)
+        self.b.browser = bridge.AppPages(self.b, source="web")
+
+    def report(self, pages, focused=()):
+        self.b.browser.snapshot({"trusted": True, "copies": [{"account": "personal", "pages": pages, "focused": list(focused)}]})
+
+    def test_working_needs_you_done(self):
+        self.report({"Plan - Claude": {"buttons": ["Stop response"]}})
+        self.assertEqual(self.b.sessions["web:Plan"]["state"], "working")
+        self.report({"Plan - Claude": {"buttons": ["Stop response", "Allow once"]}})
+        self.assertEqual(self.b.sessions["web:Plan"]["state"], "alert")
+        self.report({"Plan - Claude": {"buttons": []}})
+        self.assertEqual(self.b.sessions["web:Plan"]["state"], "done")
+
+    def test_desktop_app_reports_leave_browser_sessions_alone(self):
+        self.report({"Plan - Claude": {"buttons": ["Stop response"]}})
+        self.b.app.snapshot({"trusted": True, "copies": [{"account": "personal", "pages": {}}]})
+        self.assertEqual(self.b.sessions["web:Plan"]["state"], "working")
+
+    def test_looking_at_the_tab_counts_as_seen(self):
+        self.report({"Plan - Claude": {"buttons": ["Stop response"]}})
+        self.report({"Plan - Claude": {"buttons": []}})
+        s = self.b.sessions["web:Plan"]
+        self.assertFalse(self.b.on_screen_locked(s))
+        self.report({"Plan - Claude": {"buttons": []}}, focused=["Plan - Claude"])
+        self.assertTrue(self.b.on_screen_locked(s))
+
+    def test_browser_sessions_are_not_saved(self):
+        self.report({"Plan - Claude": {"buttons": ["Stop response"]}})
+        self.assertNotIn("web:Plan", self.b.state_locked()["sessions"])

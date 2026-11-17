@@ -738,7 +738,7 @@ class Buddy:
     # reinstalling or restarting the bridge doesn't forget a pending "needs you" or unread result.
     # Chat/Cowork ("app:") sessions aren't kept: the app watcher re-reports them within seconds.
     def state_locked(self):
-        return {"sessions": {k: v for k, v in self.sessions.items() if not k.startswith("app:")},
+        return {"sessions": {k: v for k, v in self.sessions.items() if not k.startswith(("app:", "web:"))},
                 "usage": self.usage, "last_event": self.last_event, "last_active": self.last_active,
                 "goodnight_night": self.goodnight_night,
                 "meeting_dismissed": sorted(self.meeting_dismissed), "meeting_alerted": sorted(self.meeting_alerted),
@@ -991,11 +991,15 @@ class Buddy:
         return self.sounds.play(moment)
 
     def on_screen_locked(self, s):
-        """Is this session's conversation showing in the Claude app, with the app in front?"""
-        if not self.focus.front:
-            return False
+        """Is this session's conversation showing in the Claude app, with the app in front?
+        (For claude.ai in Chrome: is it the tab you're looking at? The extension says which that is.)"""
         sid = next((k for k, v in self.sessions.items() if v is s), None)
         if sid is None: return False
+        if sid.startswith("web:"):
+            web = getattr(self, "browser", None)
+            return bool(web) and sid[4:] in web.focused_names
+        if not self.focus.front:
+            return False
         if sid.startswith("app:"):
             app = getattr(self, "app", None)
             return bool(app) and app.showing(sid[4:], getattr(self.focus, "account", None))
@@ -1326,9 +1330,10 @@ class Buddy:
                     "focus": {"claude_in_front": self.focus.front, "account": getattr(self.focus, "account", None), "code_session": (self.focus.code_session or "")[:8],
                               "app_pages": sorted(getattr(getattr(self, "app", None), "visible", []))},
                     "app_watcher": None if not app or not app.seen else {"trusted": app.trusted, "last_report_s": int(now - app.seen)},
+                    "browser_watcher": None if not getattr(self, "browser", None) or not self.browser.seen else {"last_report_s": int(now - self.browser.seen)},
                     "slack": {"letters": {v.get("from"): int(now - v["since"]) for v in self.letters_locked(now).values()},
                               "watch": getattr(getattr(self, "slack", None), "status", None)},
-                    "sessions": {(k if k.startswith("app:") else k[:8]): {"state": v["state"], "age_s": int(now - v["t"]), "cwd": v["cwd"],
+                    "sessions": {(k if k.startswith(("app:", "web:")) else k[:8]): {"state": v["state"], "age_s": int(now - v["t"]), "cwd": v["cwd"],
                                                                           "account": v.get("account", PERSONAL)} for k, v in self.sessions.items()}}
 
 
@@ -1356,9 +1361,16 @@ class AppPages:
     TAB_WORK = re.compile(r"working|running|responding|thinking", re.I)
     NEEDS_TEXT = re.compile(r"asking a question|awaiting (answer|approval|permission|response)|needs (approval|permission|an answer)|approval needed|waiting for (your )?(approval|answer|permission)", re.I)
 
-    def __init__(self, buddy):
-        self.buddy, self.trusted, self.seen = buddy, None, 0.0
+    def __init__(self, buddy, source="app"):
+        # source: "app" for the desktop app's helper, "web" for the claude.ai browser extension
+        # (tools/browserwatch). Each has its own instance, since each report is the whole picture for its source.
+        self.buddy, self.trusted, self.seen, self.source = buddy, None, 0.0, source
         self.last, self.tabs, self.on_screen = {}, {}, {}   # per account: page states, mode tabs, names on screen
+        self.focused = {}                                   # per account: pages you're looking at (only the browser extension says)
+
+    @property
+    def focused_names(self):
+        return {n for names in self.focused.values() for n in names}
 
     @property
     def visible(self):
@@ -1378,7 +1390,7 @@ class AppPages:
         self.seen = time.time()
         if snap.get("trusted") != self.trusted:
             self.trusted = snap.get("trusted")
-            log.info("app watcher %s", "has Accessibility permission" if self.trusted else "is waiting for Accessibility permission")
+            if self.source == "app": log.info("app watcher %s", "has Accessibility permission" if self.trusted else "is waiting for Accessibility permission")
         copies = snap.get("copies")
         if copies is None:                          # an older helper: one copy, at the top level
             copies = [dict(snap, account=PERSONAL)]
@@ -1398,6 +1410,7 @@ class AppPages:
             self.tabs[acct] = tabs
             log.info("app tabs%s: %s", "" if acct == PERSONAL else " (%s)" % acct, " | ".join(tabs))
         self.on_screen[acct] = {prefix + self.name(t) for t in (snap.get("pages") or {})}
+        self.focused[acct] = {prefix + self.name(t) for t in (snap.get("focused") or [])}
         # usage ring in the app, e.g. "Usage: Weekly · all models: 25%, Resets Mon 8:00 AM"
         for lab in snap.get("labels") or []:
             m = self.USAGE_LABEL.match(lab)
@@ -1435,18 +1448,18 @@ class AppPages:
             prev = last.get(n)
             if state != prev:
                 if state:
-                    self.buddy.external("app:" + prefix + n, state, account=acct)
+                    self.buddy.external(self.source + ":" + prefix + n, state, account=acct)
                 elif prev in ("working", "alert"):
-                    self.buddy.external("app:" + prefix + n, "done", account=acct)
+                    self.buddy.external(self.source + ":" + prefix + n, "done", account=acct)
                 last[n] = state
         for n in [x for x in last if x not in states]:    # no longer on screen or in the sidebar
             # A conversation that still needs you keeps its sidebar badge, so if it vanished
             # entirely it was answered elsewhere, closed or deleted: drop it. Work in progress
             # we simply can't see any more gets a short grace period instead.
             if last[n] == "working":
-                self.buddy.external("app:" + prefix + n, "working", stale=self.APP_STALE, account=acct)
+                self.buddy.external(self.source + ":" + prefix + n, "working", stale=self.APP_STALE, account=acct)
             else:
-                self.buddy.forget("app:" + prefix + n)
+                self.buddy.forget(self.source + ":" + prefix + n)
             del last[n]
 
 
@@ -1659,6 +1672,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._reply(204)
             try: buddy.app.snapshot(json.loads(body or b"{}"))
             except Exception as e: log.info("bad app snapshot: %s", e)
+        elif self.path == "/browser":             # claude.ai in Chrome, from the tools/browserwatch extension
+            self._reply(204)
+            try: buddy.browser.snapshot(json.loads(body or b"{}"))
+            except Exception as e: log.info("bad browser snapshot: %s", e)
         elif self.path == "/usage":               # from tools/statusline.sh (status line JSON)
             self._reply(204)
             try:
@@ -1700,6 +1717,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 if __name__ == "__main__":
     buddy = Buddy()
     buddy.app = AppPages(buddy)
+    buddy.browser = AppPages(buddy, source="web")
     buddy.calendar = Calendar()
     buddy.slack = SlackWatch(buddy)
     log.info("desk-buddy bridge listening on 127.0.0.1:%d", HTTP_PORT)

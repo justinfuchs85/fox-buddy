@@ -39,6 +39,9 @@ The Chat/Cowork watcher needs Accessibility permission (**System Settings → Pr
 Accessibility → deskbuddy-appwatch**). Calendar, Slack and sound settings are the same as for the
 desk Lump: see the main README.
 
+Using claude.ai in Chrome instead of the desktop app? Load the extension in
+[`tools/browserwatch`](../browserwatch/README.md) and he reacts to browser chats too.
+
 ## Using him
 
 - **Click** him to tap the glass. You get a gag. If Claude needs you, it snoozes the nagging. If

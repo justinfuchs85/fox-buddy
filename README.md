@@ -71,7 +71,7 @@ There's also a full-size Lump that lives in a corner of your screen, Clippy-styl
 zsh tools/desklump/build.sh    # Builds and opens ~/Applications/Desktop Lump.app
 ```
 
-Click him to tap, drag him to move, and right-click for size, look and the clip library. See [tools/desklump](tools/desklump/README.md).
+Click him to tap, drag him to move, and right-click for size, look and the clip library. See [tools/desklump](tools/desklump/README.md). For claude.ai in Chrome, add the [browser extension](tools/browserwatch/README.md).
 
 ## Make him do something new
 
