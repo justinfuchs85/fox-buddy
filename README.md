@@ -14,9 +14,11 @@ and you can chat with him.
   working, waiting on you, or done.
 - **Talks in a speech bubble**: "Running `npm test`", "needs your permission to use Bash", "done: …".
   **Show me** brings that session forward: the terminal, the browser tab or the Claude app.
-- **Chats**: double-click him to ask a question. Follow-ups keep the same conversation. Bigger jobs go
-  to Claude Desktop with **Open in Claude**. Replies come from Claude Code with every tool switched
-  off, so he can only talk.
+- **Chats and helps**: double-click him to ask a question. He can find files by name in Desktop,
+  Documents and Downloads (and open them if you let him), read your Gmail and Google Calendar, search
+  the web, and check your iPhone activity summary. He changes your calendar or writes a Gmail draft
+  only after you click **Yes, do it**, and never sends email. Bigger jobs go to Claude Desktop with
+  **Open in Claude**. Details: [His tools](tools/foxbuddy/README.md#his-tools).
 - **Gags**: click him for one of 14 (pounce, tail chase, zoomies, floss, dab, dubstep and more), or
   pick one from the right-click menu.
 - **Extras**: goes from orange toward red as you near your Claude usage limits, holds a ringing clock
@@ -57,7 +59,7 @@ For a second Claude Code profile, run `python3 tools/install_hooks.py --config-d
 
 | Path | What it is |
 |---|---|
-| `tools/foxbuddy` | The Mac app: window, menu, speech bubble, chat, and the socket the bridge talks to |
+| `tools/foxbuddy` | The Mac app: window, menu, speech bubble, chat, his tools, and the socket the bridge talks to |
 | `characters/fox` | The fox: drawn entirely in code by his own rig |
 | `tools/buddy_bridge.py` | The bridge: turns Claude's activity into his moods (a login item, on `127.0.0.1:47823`) |
 | `tools/install_hooks.py`, `tools/statusline.sh` | Claude Code hooks and the usage status line |
@@ -65,8 +67,10 @@ For a second Claude Code profile, run `python3 tools/install_hooks.py --config-d
 | `tools/browserwatch` | Chrome and Safari extension for claude.ai |
 | `tests` | The bridge's tests: `python3 -m unittest discover -s tests` |
 
-Everything stays on your Mac: the bridge and the app only listen on `127.0.0.1`, the app makes no
-internet requests, and the browser extension sends labels like "Stop response", never message text.
+The bridge and the app only listen on `127.0.0.1`, the app's own window makes no internet requests,
+and the browser extension sends labels like "Stop response", never message text. His chats go to
+Claude through Claude Code, with whatever he looks up for you: see
+[what leaves your Mac](tools/foxbuddy/README.md#his-tools).
 
 ## Credit
 

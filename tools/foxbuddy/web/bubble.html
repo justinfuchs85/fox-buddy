@@ -52,9 +52,22 @@
   .row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
   .row .spacer { flex: 1; }
   .hint { color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+  .row2 { display: flex; align-items: center; gap: 8px; }
+  .row2 .spacer { flex: 1; }
+  button.link, button.chip { white-space: nowrap; }
   .dots span { display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--accent); animation: bob 1s infinite ease-in-out; }
   .dots span:nth-child(2) { animation-delay: .15s; } .dots span:nth-child(3) { animation-delay: .3s; }
   @keyframes bob { 0%, 80%, 100% { transform: translateY(0); opacity: .5 } 40% { transform: translateY(-5px); opacity: 1 } }
+  button.chip { border: 1px solid var(--line); border-radius: 999px; background: none; padding: 3px 9px; color: var(--muted); font: 600 11.5px -apple-system, sans-serif; cursor: pointer; }
+  button.chip.on { border-color: var(--accent); color: var(--accent); }
+  button.reveal { border: 0; background: none; padding: 0 0 0 6px; color: var(--accent); font: 600 11.5px -apple-system, sans-serif; cursor: pointer; white-space: nowrap; }
+  button.reveal:hover { text-decoration: underline; }
+  .confirm { margin-top: 8px; border: 1px solid var(--accent); border-radius: 10px; padding: 8px 10px; }
+  .confirm .what { font-weight: 600; margin-bottom: 8px; }
+  .confirm .actions { margin-top: 0; }
+  .confirm.settled { border-color: var(--line); }
+  .confirm.settled .actions { display: none; }
+  .confirm .result { color: var(--muted); font-size: 12px; }
   [hidden] { display: none !important; }
 </style></head>
 <body>
@@ -72,7 +85,7 @@
           <button class="link" id="newChat" title="Forget this conversation and start a new one">New chat</button>
           <button class="link" id="openClaude" title="Carry this conversation into a new Claude Desktop chat">Open in Claude</button>
         </div>
-        <div class="hint">Return sends · ⌘-Return opens in Claude</div>
+        <div class="hint row2"><span>Return sends · ⌘-Return: Claude</span><span class="spacer"></span><button class="chip" id="files" title="Let him read inside files in the folders he can search, for this chat only">Files: names only</button></div>
       </div>
     </div>
   </div>
@@ -81,7 +94,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const post = m => { try { window.webkit.messageHandlers.bubble.postMessage(m); } catch (e) { (window.__posted = window.__posted || []).push(m); } };
-  let ttlTimer = 0, hovering = false, busy = false;
+  let ttlTimer = 0, hovering = false, busy = false, readFiles = false;
   const turns = [];                                   // { you, fox } so far in this conversation, for "Open in Claude"
 
   // Everything shown comes from outside (a command, Claude's reply): it is always treated as text.
@@ -148,17 +161,48 @@
     },
     chat(focus = true) { clearTimeout(ttlTimer); $('card').className = ''; mode('chat'); scrollDown(); if (focus) setTimeout(() => $('input').focus(), 30); },
     thinking(q) { turns.push({ you: q, fox: '' }); addYou(q); pending(); setBusy(true); mode('chat'); scrollDown(); },
-    answer(text) { dropPending(); setBusy(false); if (turns.length) turns[turns.length - 1].fox = text;
-      const d = addFox(markdown(text) + '<div class="tools"><button class="link">Copy</button></div>');
-      d.querySelector('button').onclick = e => { post({ copy: text }); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1200); };
+    answer(text) { dropPending(); setBusy(false);
+      // A change he wants to make arrives as a last line "[[confirm calendar: ...]]": it becomes a button, never text.
+      let ask = null;
+      text = String(text).replace(/^[ \t]*\[\[confirm (calendar|gmail):[ \t]*([^\]\n]{1,500})\]\][ \t]*$/gim, (m, kind, what) => { ask = { kind: kind.toLowerCase(), summary: what.trim() }; return ''; }).trim();
+      if (turns.length) turns[turns.length - 1].fox = text;
+      const d = addFox(markdown(text) + '<div class="tools"><button class="link copy">Copy</button></div>');
+      d.querySelector('button.copy').onclick = e => { post({ copy: text }); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1200); };
+      d.querySelectorAll('code').forEach(c => {           // a path he found: "Show in Finder" (the app checks it's one he may show)
+        const t = c.textContent.trim();
+        if (/^(\/|~\/)[^\n]*[^\/\s]\/?$/.test(t) && t.length < 1000 && !c.closest('pre')) {
+          const b = document.createElement('button'); b.className = 'reveal'; b.textContent = 'Show in Finder';
+          b.onclick = () => post({ reveal: t.replace(/\/$/, '') }); c.after(b);
+        }
+      });
+      if (ask) confirmCard(d, ask);
       scrollDown(); report(); },
     error(text) { dropPending(); setBusy(false); addFox(markdown(text), 'err'); scrollDown(); report(); },
     stopped(why) { if (!busy) return; dropPending(); setBusy(false); addFox(esc(why || 'Stopped.'), 'err'); report(); },
-    reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; report(); },
+    reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };
+  // A change waiting for your OK. Only the newest one can be approved; sending anything else cancels it.
+  function confirmCard(d, ask) {
+    settleAll('Not done.');
+    const card = document.createElement('div'); card.className = 'confirm live';
+    card.innerHTML = `<div class="what">${ask.kind === 'calendar' ? 'Calendar change' : 'Gmail draft'}: ${esc(ask.summary)}</div>` +
+      '<div class="actions"><button class="act primary yes">Yes, do it</button><button class="act no">No</button></div><div class="result" hidden></div>';
+    card.querySelector('.yes').onclick = () => {
+      if (busy) return;
+      settle(card, 'Approved.');
+      turns.push({ you: 'Yes, do it: ' + ask.summary, fox: '' }); addYou('Yes, do it'); pending(); setBusy(true); scrollDown();
+      post({ confirm: ask });
+    };
+    card.querySelector('.no').onclick = () => settle(card, 'Not done.');
+    d.appendChild(card);
+  }
+  function settle(card, why) { card.classList.remove('live'); card.classList.add('settled'); const r = card.querySelector('.result'); r.textContent = why; r.hidden = false; report(); }
+  function settleAll(why) { document.querySelectorAll('.confirm.live').forEach(c => settle(c, why)); }
+  function setFiles(on) { readFiles = on; $('files').classList.toggle('on', on); $('files').textContent = on ? 'Files: can open' : 'Files: names only'; }
+  $('files').onclick = () => { setFiles(!readFiles); post({ readFiles }); };
   $('close').onclick = () => post({ action: 'dismiss' });
   $('jump').onclick = () => post({ action: 'jump' });
-  const send = () => { const q = $('input').value.trim(); if (!q || busy) return; $('input').value = ''; post({ ask: q.slice(0, 4000) }); };
+  const send = () => { const q = $('input').value.trim(); if (!q || busy) return; $('input').value = ''; settleAll('Not done.'); post({ ask: q.slice(0, 4000) }); };
   $('send').onclick = send;
   $('newChat').onclick = () => { window.bubble.reset(); post({ newChat: true }); $('input').focus(); };
   $('openClaude').onclick = () => { openInClaude($('input').value); };

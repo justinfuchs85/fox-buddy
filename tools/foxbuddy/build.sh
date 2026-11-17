@@ -25,6 +25,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BUILD/FoxBuddy" "$APP/Contents/MacOS/FoxBuddy"
 cp -R "$WEB" "$APP/Contents/Resources/web"
+cp "$HERE/foxtools.py" "$APP/Contents/Resources/foxtools.py"    # his own tools: find files by name, read your activity summary
 ICONSET="$BUILD/FoxBuddy.iconset"; mkdir -p "$ICONSET"
 for px in 16 32 128 256 512; do
   sips -z $px $px "$HERE/icon.png" --out "$ICONSET/icon_${px}x${px}.png" >/dev/null
