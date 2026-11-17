@@ -22,8 +22,14 @@
   // Deterministic jitter, so a drawing wobbles the same way every time it's shown with the same seed.
   const rnd = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
   // Points are [x, y] (smooth) or [x, y, 1] (a sharp corner, like an ear tip).
+  // The hand-drawn wobble drifts continuously: each point sways on its own slow loop (its own speed
+  // and phase, fixed by the seed), so the line breathes instead of jumping from frame to frame.
+  let now = 0;                       // seconds; render() sets it each frame
   function wob(pts, seed, amt) {
-    return pts.map((p, i) => [p[0] + (rnd(seed, i * 2) - 0.5) * 2 * amt, p[1] + (rnd(seed, i * 2 + 1) - 0.5) * 2 * amt, p[2]]);
+    return pts.map((p, i) => {
+      const a = rnd(seed, i * 2) * 6.283, b = rnd(seed, i * 2 + 1) * 6.283, k = 0.8 + rnd(seed, i * 2 + 7) * 0.7;
+      return [p[0] + Math.sin(now * 1.9 * k + a) * amt, p[1] + Math.cos(now * 1.6 * k + b) * amt, p[2]];
+    });
   }
   // A path through the points: smooth curves between midpoints, straight into and out of corners.
   function trace(c, pts, closed) {
@@ -61,7 +67,7 @@
   }
   // Fill a shape off-register in `colour`, then draw its wobbly outline on top.
   function part(c, pts, colour, seed, o = {}) {
-    const w = o.wobble ?? 1.6;
+    const w = o.wobble ?? 1.1;
     if (colour) {
       c.save(); c.translate(o.offX ?? 3.5, o.offY ?? 2.5);
       trace(c, wob(pts, seed + 50, w), true); c.fillStyle = colour; c.fill();
@@ -75,12 +81,12 @@
   // Fill a shape (off-register) clipped inside another, with no line: markings like his white chest.
   function marking(c, clipPts, pts, colour, seed) {
     c.save();
-    c.translate(3.5, 2.5); trace(c, wob(clipPts, seed + 50, 1.6), true); c.clip();
-    c.translate(0, 0); trace(c, wob(pts, seed + 70, 1.2), true); c.fillStyle = colour; c.fill();
+    c.translate(3.5, 2.5); trace(c, wob(clipPts, seed + 50, 1.1), true); c.clip();
+    trace(c, wob(pts, seed + 70, 0.8), true); c.fillStyle = colour; c.fill();
     c.restore();
   }
   function stroke(c, pts, seed, width = 3, colour) {
-    trace(c, wob(pts, seed, 1), false);
+    trace(c, wob(pts, seed, 0.6), false);
     c.strokeStyle = colour || INK; c.lineWidth = width; c.lineCap = c.lineJoin = 'round'; c.stroke();
   }
   function dot(c, x, y, r, colour) { c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fillStyle = colour || INK; c.fill(); }
@@ -89,5 +95,6 @@
   const turn = (p, ox, oy, a, k = 1) => { const x = (p[0] - ox) * k, y = (p[1] - oy) * k; return [ox + x * Math.cos(a) - y * Math.sin(a), oy + x * Math.sin(a) + y * Math.cos(a), p[2]]; };
 
   window.__foxDraw = { CREAM, INK, DARK, PAPER_BG, ink, fur, rnd, wob, trace, oval, part, marking, stroke, dot, turn,
-                       get tint() { return tint; }, set tint(v) { tint = v; }, get line() { return line; }, set line(v) { line = v; } };
+                       get tint() { return tint; }, set tint(v) { tint = v; }, get line() { return line; }, set line(v) { line = v; },
+                       get now() { return now; }, set now(v) { now = v; } };
 })();

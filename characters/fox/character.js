@@ -15,6 +15,10 @@
   let uid = 0;
   const add = (name, pose) => { const id = name + '_' + (uid++); D[id] = pose; return id; };
   const P0 = { build: 'chibi' };
+  // what blends smoothly between poses, and where a tucked-away paw is (to blend a paw in or out from)
+  const NUM = ['x', 'y', 'squash', 'lean', 'tilt', 'hx', 'hy', 'earL', 'earR', 'perk', 'tail', 'curl', 'tailK'];
+  const TUCK = { L: [114, 186], R: [142, 186] };
+
   const mix = (...ps) => Object.assign({}, P0, ...ps);
   const wave = (i, n, a = 1) => Math.sin(i / n * Math.PI * 2) * a;
 
@@ -45,16 +49,34 @@
   for (const m of MOMENTS) {
     const frames = MOODS[m]();
     firstPose[m] = frames[0][0];
-    LOOPS[m] = frames.map(([p, t]) => [add(m, p), t]);
+    LOOPS[m] = smooth(frames, true).map(([p, t]) => [add(m, p), t]);
   }
 
   // ---------- in between: blend one pose into another ----------
-  const NUM = ['x', 'y', 'squash', 'lean', 'tilt', 'hx', 'hy', 'earL', 'earR', 'perk', 'tail', 'curl', 'tailK'];
-  const TUCK = { L: [114, 186], R: [142, 186] };
+  // Keyframes [pose, ticks] -> one drawing per tick. Each pose holds, then eases into the next over its last
+  // few ticks (a loop eases the whole way, and round from its last pose back to its first).
+  function smooth(frames, loop = false, ease = 4) {
+    const out = [], es = u => u * u * (3 - 2 * u);
+    frames.forEach(([p, t], k) => {
+      const next = frames[k + 1] ? frames[k + 1][0] : loop ? frames[0][0] : null;
+      const e = !next ? 0 : loop ? t : Math.min(t, ease);
+      for (let j = 0; j < t; j++) {
+        const into = j - (t - e);
+        if (!next || into < 0) { out.push([p, 1]); continue; }
+        const u = loop ? j / t : (into + 1) / (e + 1);
+        out.push([blend(p, next, es(u)), 1]);
+      }
+    });
+    return out;
+  }
   function blend(a, b, t) {
     const out = Object.assign({}, t < 0.5 ? a : b);
     for (const k of NUM) out[k] = (a[k] ?? R.pose({})[k]) * (1 - t) + (b[k] ?? R.pose({})[k]) * t;
     out.look = [0, 1].map(j => ((a.look || [0, 0])[j]) * (1 - t) + ((b.look || [0, 0])[j]) * t);
+    if (!!a.tailFront !== !!b.tailFront || !!a.wrap !== !!b.wrap)      // swinging round to the front: pull it in on the way past
+      out.tailK = (out.tailK || 1) * (1 - 0.4 * Math.sin(Math.PI * t));
+    for (const k of ['leaf', 'bubble'])                  // drifting leaf, growing bubble: smooth too, while both have one
+      if (typeof a[k] === 'number' && typeof b[k] === 'number' && a[k] >= 0 && b[k] >= 0) out[k] = a[k] * (1 - t) + b[k] * t;
     for (const s of ['L', 'R']) {
       const ka = a['arm' + s], kb = b['arm' + s];
       if (!ka && !kb) { out['arm' + s] = null; continue; }
@@ -64,7 +86,7 @@
     return out;
   }
   // n drawings from a to b, a blink and a little squash at the switch, ease in and out
-  function tween(a, b, n = 6, ticks = 2, o = {}) {
+  function tween(a, b, n = 12, ticks = 1, o = {}) {
     const out = [];
     for (let i = 1; i <= n; i++) {
       const t = i / n, e = t * t * (3 - 2 * t), p = blend(a, b, e);
@@ -83,7 +105,7 @@
     const pa = firstPose[a], pb = firstPose[b];
     const mid = mix(AWAKE, { eyes: 'dot', fx: 'none' });           // through a plain awake pose when both ends are busy
     const busy = p => p.prop || p.wrap || p.armL || p.armR;
-    const frames = busy(pa) && busy(pb) ? [...tween(pa, mid, 5), ...tween(mid, pb, 5)] : tween(pa, pb, 8);
+    const frames = busy(pa) && busy(pb) ? [...tween(pa, mid, 10), ...tween(mid, pb, 10)] : tween(pa, pb, 16);
     TRANS[`${a}>${b}`] = seq(`t_${a}_${b}`, frames);
   }
 
@@ -93,18 +115,19 @@
   // An event that starts and ends in mood m: walk from m's pose to standing, play the beats, walk back.
   function event(name, m, beats, o = {}) {
     const from = firstPose[m], start = o.start || STAND;
-    const into = o.noInto ? [] : tween(from, start, 5);
-    const out = o.noOut ? [] : tween(beats.length ? beats[beats.length - 1][0] : start, from, 6);
-    CLIPS[name] = { home: m, seq: seq(name, [...into, ...beats, ...out]) };
+    const into = o.noInto ? [] : tween(from, start, 10);
+    const out = o.noOut ? [] : tween(beats.length ? beats[beats.length - 1][0] : start, from, 12);
+    CLIPS[name] = { home: m, seq: seq(name, [...into, ...smooth([[start, 4], ...beats]), ...out]) };
   }
   // beats: [ticks, patch] in order, each on top of the standing pose (or o.base)
   const beat = (list, base = STAND) => list.map(([t, p]) => [mix(base, p), t]);
 
+  const smoothFrom = (p, beats) => smooth([[p, 3], ...beats]);
   // fidgets while asleep (no walking to standing: he stays asleep)
   const S = firstPose.idle;
-  CLIPS.fidget_toss = { home: 'idle', seq: seq('fidget_toss', beat([[6, { lean: -0.06, tilt: -0.08 }], [8, { lean: -0.1, tilt: -0.14, earL: 0.5, mouth: 'wobble' }], [20, { lean: -0.04, tilt: 0.12, earR: 0.5 }], [6, { lean: 0.03, tilt: 0.1 }], [8, {}]], S)) };
-  CLIPS.fidget_twitch = { home: 'idle', seq: seq('fidget_twitch', beat([[4, {}], [3, { earL: -0.25 }], [3, { earL: 0.4 }], [3, { earL: -0.2 }], [6, { earL: 0.3 }], [4, { earR: -0.25 }], [3, { earR: 0.35 }], [8, {}]], S)) };
-  CLIPS.fidget_bubble = { home: 'idle', seq: seq('fidget_bubble', beat([[6, { bubble: 4 }], [8, { bubble: 8 }], [8, { bubble: 12 }], [10, { bubble: 15 }], [4, { bubble: -1, eyes: 'squint', earL: -0.1, earR: -0.1 }], [8, { eyes: 'closed' }], [6, {}]], S)) };
+  CLIPS.fidget_toss = { home: 'idle', seq: seq('fidget_toss', smoothFrom(S, beat([[6, { lean: -0.06, tilt: -0.08 }], [8, { lean: -0.1, tilt: -0.14, earL: 0.5, mouth: 'wobble' }], [20, { lean: -0.04, tilt: 0.12, earR: 0.5 }], [6, { lean: 0.03, tilt: 0.1 }], [8, {}]], S))) };
+  CLIPS.fidget_twitch = { home: 'idle', seq: seq('fidget_twitch', smoothFrom(S, beat([[4, {}], [3, { earL: -0.25 }], [3, { earL: 0.4 }], [3, { earL: -0.2 }], [6, { earL: 0.3 }], [4, { earR: -0.25 }], [3, { earR: 0.35 }], [8, {}]], S))) };
+  CLIPS.fidget_bubble = { home: 'idle', seq: seq('fidget_bubble', smoothFrom(S, beat([[6, { bubble: 4 }], [8, { bubble: 8 }], [8, { bubble: 12 }], [10, { bubble: 15 }], [4, { bubble: -1, eyes: 'squint', earL: -0.1, earR: -0.1 }], [8, { eyes: 'closed' }], [6, {}]], S))) };
   // hello: wakes, stretches, waves, settles back down
   event('hello', 'idle', beat([[6, { eyes: 'squint', mouth: 'open', squash: -0.08, armL: [96, 96], armR: [160, 96] }], [8, { eyes: 'squint', mouth: 'open', squash: -0.1, armL: [92, 86], armR: [164, 86] }],
     [5, { eyes: 'happy', mouth: 'smile', armR: [176, 92] }], [5, { eyes: 'happy', mouth: 'smile', armR: [186, 104] }], [5, { eyes: 'happy', mouth: 'smile', armR: [176, 92] }], [5, { eyes: 'happy', mouth: 'smile', armR: [186, 104] }], [10, { eyes: 'dot', mouth: 'w', tail: 0.2 }]]), { start: STAND });
@@ -146,7 +169,7 @@
   }
   // at night only a soft startle: one eye opens, he grumbles, back to sleep
   const N = firstPose.night;
-  CLIPS.tap_startle_night = { home: 'night', seq: seq('startle', beat([[3, { squash: 0.06, earL: 0.1, earR: 0.1 }], [8, { eyes: 'squint', earR: 0, mouth: 'flat' }], [10, { eyes: 'squint', mouth: 'wobble', brows: 'cross' }], [6, { eyes: 'closed', mouth: 'flat' }], [10, {}]], N)) };
+  CLIPS.tap_startle_night = { home: 'night', seq: seq('startle', smoothFrom(N, beat([[3, { squash: 0.06, earL: 0.1, earR: 0.1 }], [8, { eyes: 'squint', earR: 0, mouth: 'flat' }], [10, { eyes: 'squint', mouth: 'wobble', brows: 'cross' }], [6, { eyes: 'closed', mouth: 'flat' }], [10, {}]], N))) };
   // meeting prep: checks a pocket watch, straightens up, nods
   for (const m of MOMENTS) {
     if (m === 'night') continue;
@@ -236,7 +259,9 @@
       else for (let k = 0; k < 5; k++) { const a2 = k / 5 * Math.PI * 2; stroke(c, [[n[0] + 14 + Math.cos(a2) * 8, n[1] + 6 + Math.sin(a2) * 8], [n[0] + 14 + Math.cos(a2) * 14, n[1] + 6 + Math.sin(a2) * 14]], seed + 730 + k, 2, ink()); }
     }
     if (P.leaf !== undefined) {                          // a leaf drifting down onto his nose, then blown away
-      const path = [[150, 20], [118, 50], [140, 82], [129, 112], [129, 112], [168, 70], [210, 30]], q = path[Math.min(P.leaf, path.length - 1)];
+      const path = [[150, 20], [118, 50], [140, 82], [129, 112], [129, 112], [168, 70], [210, 30]];
+      const f = Math.min(P.leaf, path.length - 1), i0 = Math.floor(f), i1 = Math.min(path.length - 1, i0 + 1), u = f - i0;
+      const q = [path[i0][0] * (1 - u) + path[i1][0] * u, path[i0][1] * (1 - u) + path[i1][1] * u];
       c.save(); c.translate(q[0] + (P.x || 0), q[1]); c.rotate(P.leaf * 0.7);
       part(c, [[-10, 0], [0, -6], [12, 0], [0, 6]], '#E0892B', seed + 740, { width: 2.4 }); stroke(c, [[-12, 0], [12, 0]], seed + 741, 1.6);
       c.restore();
@@ -246,7 +271,8 @@
   // ---------- drawing a frame ----------
   function render(c, m, id, tick, opts = {}) {
     const P = D[id] || D[LOOPS.idle[0][0]];
-    const seed = opts.still ? 1 : (Math.floor(tick / 2) % 3) * 17 + (id.length * 7);
+    const seed = 11;                                       // the same for every drawing, so nothing jumps between them
+    F.now = opts.still ? 0 : (opts.time ?? performance.now() / 1000);
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = F.line === 'paper' ? F.PAPER_BG : '#000'; c.fillRect(0, 0, 240, 240);
     // (the rig draws his floor shadow first: the app relies on the first fill of a frame being the shadow)

@@ -8,8 +8,8 @@ commissioned him, and they choose his license.
 
 | File | What it does |
 |---|---|
-| `fox.js` | Drawing primitives: the wobbling hand-drawn line and the off-register fills |
-| `rig.js` | The puppet: body, head, ears, tail (a generated spine with tufts), paws and face, all poseable |
+| `fox.js` | Drawing primitives: the gently drifting hand-drawn line (each point sways on its own slow loop) and the off-register fills |
+| `rig.js` | The puppet: body, head, ears, tail (a generated, smoothly curved spine), paws and face, all poseable |
 | `character.js` | His moods, transitions, fidgets, events and gags, as poses over time, plus his props and marks |
 
 ## What he does
@@ -45,4 +45,5 @@ A drawing is just a pose, for example:
 ```
 
 See the top of `rig.js` for every setting. A gag is a list of `[ticks, pose]` beats in `GAG`, in
-`character.js`, at 24 ticks a second. Re-run `zsh tools/desklump/build.sh` after changing anything.
+`character.js`, at 24 ticks a second. Every beat eases into the next (`smooth()`), so you only write the
+key poses: there's a fresh drawing every tick. Re-run `zsh tools/desklump/build.sh` after changing anything.

@@ -112,7 +112,7 @@
 
     // The generated tail: sample the spine, bend it (tail swings the whole thing, curl bends it more
     // towards the tip), then walk out to each side by a width that swells and tapers to a soft point,
-    // with tufts of fur along the outer edge and at the tip.
+    // as smooth curves through a handful of points (fewer points, smoother line).
     const spineTail = () => {
       const sp = P.wrap ? B.tail.wrap : B.tail.spine, N = 22, pts = [];
       const cr = (a, b, c2, d, t) => 0.5 * (2 * b + (-a + c2) * t + (2 * a - 5 * b + 4 * c2 - d) * t * t + (-a + 3 * b - 3 * c2 + d) * t * t * t);
@@ -128,12 +128,12 @@
         const p0 = bent[Math.max(0, i - 1)], p1 = bent[Math.min(N - 1, i + 1)], dx = p1[0] - p0[0], dy = p1[1] - p0[1], len = Math.hypot(dx, dy) || 1;
         const nx = -dy / len, ny = dx / len, t = i / (N - 1);
         const w = (7 + 15 * Math.sin(Math.min(1, t * 1.15) * Math.PI * 0.92)) * P.tailK * B.tail.width * (P.wrap ? 0.8 : 1);
-        const tuft = (i % 4 === 2 && i > 3 && i < N - 2) ? 6 : 0;
-        L.push([bent[i][0] + nx * (w + tuft), bent[i][1] + ny * (w + tuft), tuft ? 1 : 0]);
+        if (i % 3 !== 0 && i !== N - 1) continue;           // every third sample is plenty for a smooth curve
+        L.push([bent[i][0] + nx * w, bent[i][1] + ny * w]);
         R.push([bent[i][0] - nx * w * 0.9, bent[i][1] - ny * w * 0.9]);
       }
       const end = bent[N - 1], prev = bent[N - 3], ex = end[0] - prev[0], ey = end[1] - prev[1], el = Math.hypot(ex, ey) || 1;
-      const tip = [end[0] + ex / el * 10, end[1] + ey / el * 10, 1];
+      const tip = [end[0] + ex / el * 12, end[1] + ey / el * 12];      // a soft, rounded point
       const outline = [...L, tip, ...R.reverse()].map(T);
       const tipAt = T(bent[N - 4]);
       return { outline, tip: [tipAt[0], tipAt[1], 17 * P.tailK] };
@@ -153,9 +153,9 @@
         const t0 = B.tail.front ? T(B.tail.tip) : turn(T(B.tail.tip), tb[0], tb[1], -P.tail, P.tailK);
         tipC = [t0[0], t0[1], B.tail.tip[2] * P.tailK];
       }
-      part(c, tp, F.tint, seed + 300);
+      part(c, tp, F.tint, seed + 300, { wobble: 0.8 });
       marking(c, tp, oval(tipC[0], tipC[1], tipC[2], tipC[2] * 1.15, 12), F.fur(), seed + 310);
-      part(c, tp, null, seed + 300);          // redraw the outline over the white tip
+      part(c, tp, null, seed + 300, { wobble: 0.8 });          // redraw the outline over the white tip
     };
     const tailInFront = B.tail.front || P.tailFront || P.wrap;
     if (!tailInFront) drawTail();
