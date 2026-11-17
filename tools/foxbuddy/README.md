@@ -92,6 +92,7 @@ never sends email.
 | Find files | His own tool (`foxtools.py`) searches by name in Desktop, Documents and Downloads | Names, sizes and dates only. Each file he mentions gets a **Show in Finder** button. |
 | Open files | Claude Code's `Read`, limited to the same folders | Off until you click **Files: names only** under the chat (it turns to **Files: can open**). Lasts for that chat only. |
 | Check your activity | His own tool reads the summary your iPhone saves ([Activity updates](#activity-updates)) | That one folder |
+| Answer money questions | His own tool asks your Fuchs Bucks for transactions, budgets, goals, balances, net worth and debts | Read-only, only once you connect it ([Fuchs Bucks](#fuchs-bucks)) |
 | Search the web | Claude Code's `WebSearch` | He's told never to put your private details in a search |
 | Read Gmail | Your claude.ai Gmail connector: search, threads, messages, drafts | Can't send, reply, forward, trash or relabel: those tools are removed |
 | Read Google Calendar | Your claude.ai Google Calendar connector: calendars, events, free time | |
@@ -113,6 +114,7 @@ which calendar is your work one, who "the team" is.
 | `fox_folders` | `["~/Desktop", "~/Documents", "~/Downloads"]` |
 | `fox_activity_dirs` | iCloud Drive's `Shortcuts/Fox Buddy` folder, and `Fox Buddy` at the top of iCloud Drive |
 | `fox_gmail_server`, `fox_calendar_server` | `claude_ai_Gmail`, `claude_ai_Google_Calendar` |
+| `fuchs_bucks_url` | none (set by `connect_fuchs_bucks.sh`) |
 
 The last two must match what Claude Code calls your connectors. Run `claude mcp list` and look for
 the Gmail and Google Calendar lines: `claude.ai Gmail` becomes `claude_ai_Gmail` (dots and spaces
@@ -132,6 +134,23 @@ each time the app starts.
 **Untrusted content.** Emails, files and web pages can contain text written to trick an assistant. He's
 told never to follow instructions found in them, he can't fetch web pages, and he can't change
 anything without your OK, but read a card before you click **Yes**.
+
+## Fuchs Bucks
+
+He can answer questions like "how much did we spend on dining out last month?" or "how's the emergency
+fund coming along?" from your Fuchs Bucks ledger. He uses the same seven read-only lookups as Fuchs
+Bucks' own Insights chat, through its `/api/fox` route, and can't change anything there.
+
+1. Fuchs Bucks needs the `/api/fox` route (the `fox-buddy-read-access` change in personal-ledger).
+2. On your Mac: `zsh tools/foxbuddy/connect_fuchs_bucks.sh`. It makes a random access token, keeps it in
+   your Keychain ("Fox Buddy: Fuchs Bucks"), and prints its SHA-256 fingerprint.
+3. In Vercel, add `FOX_TOKEN_SHA256` (that fingerprint) and `FOX_USER_EMAIL` (your Fuchs Bucks login)
+   to the Fuchs Bucks project for Production, and redeploy. He sees what that login sees, scoped to
+   your household.
+
+To turn it off: `zsh tools/foxbuddy/connect_fuchs_bucks.sh --disconnect`, and remove
+`FOX_TOKEN_SHA256` in Vercel. Without both settings the route acts as if it doesn't exist. What he looks
+up goes to Claude with the rest of the chat, like everything else he reads.
 
 ## Activity updates
 
@@ -166,5 +185,6 @@ time you're usually using your phone, or just run it before you ask him.
 | `web/desktop.js` | The player: sequencing, the bridge's commands, the corner counts and the offline mode. |
 | `web/bubble.html` | The speech bubble and chat window. |
 | `icon.png` | The app icon, rendered from the fox's own rig. |
-| `foxtools.py` | His own tools, for Claude Code: find files by name, read your activity summary. Read-only. |
+| `foxtools.py` | His own tools, for Claude Code: find files by name, read your activity summary, look things up in Fuchs Bucks. Read-only. |
+| `connect_fuchs_bucks.sh` | Connects (or disconnects) Fuchs Bucks: a token in your Keychain, its fingerprint for Vercel. |
 | `build.sh` | Bundles the fox, compiles the app, and points the bridge at it. |

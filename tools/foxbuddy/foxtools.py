@@ -7,11 +7,14 @@ each of his chats. It can't change anything.
                one is a separate switch in his chat, enforced by Claude Code itself.
   activity     reads the activity summary your iPhone Shortcut saves (--activity-dir, repeatable):
                steps, workouts and the like. Only the files in that folder.
+  finances     looks things up in Fuchs Bucks (--fuchs-bucks-url), read-only: transactions, budgets,
+               goals, accounts, net worth, debts, assets. Only when you've connected it
+               (tools/foxbuddy/connect_fuchs_bucks.sh): the access token lives in your Keychain.
 
 Run by the app (tools/foxbuddy/main.swift) as:
   python3 foxtools.py --folder ~/Desktop --folder ~/Documents --activity-dir "~/Library/Mobile Documents/..."
 """
-import fnmatch, json, os, re, shutil, subprocess, sys, time
+import fnmatch, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.request
 from datetime import datetime
 
 MAX_SCAN = 300_000          # entries looked at per search, at most
@@ -174,6 +177,72 @@ def activity(args, dirs):
     return "\n\n".join(out)
 
 
+KEYCHAIN_SERVICE = "Fox Buddy: Fuchs Bucks"
+FINANCE_LOOKUPS = ["get_transactions", "get_budgets", "get_savings_goals", "get_accounts",
+                   "get_net_worth_snapshots", "get_debts", "get_assets_and_liabilities"]
+MAX_FINANCE_BYTES = 40_000
+
+
+def fuchs_bucks_token():
+    t = os.environ.get("FOX_FUCHS_BUCKS_TOKEN")             # (for tests)
+    if t:
+        return t.strip()
+    if not shutil.which("security"):
+        return None
+    try:
+        out = subprocess.run(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+                             capture_output=True, text=True, timeout=10)
+    except Exception:
+        return None
+    return out.stdout.strip() or None
+
+
+def finances(args, base):
+    lookup = str(args.get("lookup") or "")
+    if lookup not in FINANCE_LOOKUPS:
+        return "Pick a lookup: " + ", ".join(FINANCE_LOOKUPS)
+    filters = args.get("filters") if isinstance(args.get("filters"), dict) else {}
+    token = fuchs_bucks_token()
+    if not token:
+        return "Fuchs Bucks isn't connected on this Mac (no access token in the Keychain). Run tools/foxbuddy/connect_fuchs_bucks.sh."
+    req = urllib.request.Request(base + "/api/fox", method="POST",
+                                 data=json.dumps({"tool": lookup, "input": filters}).encode(),
+                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            body = r.read(MAX_FINANCE_BYTES * 4).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 404):
+            return f"Fuchs Bucks refused the lookup ({e.code}): the access token or its settings on the server don't match. Run tools/foxbuddy/connect_fuchs_bucks.sh again."
+        return f"Fuchs Bucks had a problem ({e.code})."
+    except Exception as e:
+        return f"Couldn't reach Fuchs Bucks: {e}"
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return "Fuchs Bucks sent back something unexpected."
+    if "error" in data:
+        return "Fuchs Bucks: " + str(data["error"])
+    text = json.dumps(data.get("result"), separators=(",", ":"))
+    if len(text) > MAX_FINANCE_BYTES:
+        text = text[:MAX_FINANCE_BYTES] + " …(cut short: narrow the dates or filters)"
+    return text
+
+
+FINANCES_TOOL = {
+    "name": "finances",
+    "description": "Look up the user's own finances in their Fuchs Bucks ledger (read-only, amounts in USD). "
+                   "lookup is one of: get_transactions (filters: startDate, endDate as YYYY-MM-DD; categoryName (exact); "
+                   "descriptionContains; minAmount, maxAmount (expenses are negative); limit, default 200, max 500), "
+                   "get_budgets, get_savings_goals, get_accounts (balances), get_net_worth_snapshots (filters: limit), "
+                   "get_debts, get_assets_and_liabilities. Scope transactions by date or category whenever the question allows. "
+                   "Transactions marked excludeFromSpend (transfers and the like) don't count as spending.",
+    "inputSchema": {"type": "object", "properties": {
+        "lookup": {"type": "string", "enum": FINANCE_LOOKUPS},
+        "filters": {"type": "object"}},
+        "required": ["lookup"], "additionalProperties": False},
+}
+
 TOOLS = [
     {"name": "find_files",
      "description": "Find files and folders BY NAME in the folders the user allowed (it never reads inside files). "
@@ -192,10 +261,14 @@ TOOLS = [
 
 
 def main(argv):
-    roots, dirs = [], []
+    roots, dirs, money = [], [], None
     it = iter(argv)
     for a in it:
-        if a == "--folder":
+        if a == "--fuchs-bucks-url":
+            u = next(it, "").rstrip("/")
+            if re.match(r"^https://[A-Za-z0-9.-]+(:\d+)?$", u) or re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$", u):
+                money = u
+        elif a == "--folder":
             p = real(next(it, ""))
             if os.path.isdir(p):
                 roots.append(p)
@@ -222,7 +295,7 @@ def main(argv):
                 "protocolVersion": params.get("protocolVersion") or "2025-06-18",
                 "capabilities": {"tools": {}}, "serverInfo": {"name": "fox", "version": "1.0"}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS + ([FINANCES_TOOL] if money else [])}})
         elif method == "tools/call":
             name, args = params.get("name"), params.get("arguments") or {}
             try:
@@ -230,6 +303,8 @@ def main(argv):
                     text = find_files(args, roots) if roots else "The user hasn't allowed any folders."
                 elif name == "activity":
                     text = activity(args, dirs)
+                elif name == "finances" and money:
+                    text = finances(args, money)
                 else:
                     raise ValueError(f"no tool called {name}")
                 send({"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}})
