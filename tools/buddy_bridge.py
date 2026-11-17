@@ -191,6 +191,75 @@ def command_clip(cmd, worked, payload):
     return None
 
 
+# ---------- narration (Desktop Lump's speech bubble) ----------
+# Desktop Lump can say what Claude is up to in a speech bubble. The bridge turns events into one short
+# line each and sends them to the desktop app only ("n <json>": the board has no bubble). Nothing here is
+# logged: a line can include a command or the start of Claude's reply.
+QUICK_ASK_DIR = os.path.join(HOME, "ask")          # Desktop Lump's quick questions run here: never narrated
+APP_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]{2,100}")
+CLAUDE_APP_ID = "com.anthropic.claudefordesktop"
+
+
+def _short(s, n):
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= n else s[:n - 1].rstrip() + "…"
+
+
+def narrate_tool(tool, inp):
+    """One line for what a tool call is doing ("Running `npm test`")."""
+    inp = inp if isinstance(inp, dict) else {}
+    name = lambda p: os.path.basename(str(p or "").rstrip("/")) or "a file"
+    if tool == "Bash":
+        return f"Running `{_short(inp.get('command'), 48)}`"
+    if tool in ("Edit", "MultiEdit", "NotebookEdit"):
+        return f"Editing {name(inp.get('file_path') or inp.get('notebook_path'))}"
+    if tool == "Write":
+        return f"Writing {name(inp.get('file_path'))}"
+    if tool == "Read":
+        return f"Reading {name(inp.get('file_path'))}"
+    if tool in ("Grep", "Glob"):
+        return f"Searching for {_short(inp.get('pattern'), 40)}"
+    if tool == "WebSearch":
+        return f"Searching the web for “{_short(inp.get('query'), 44)}”"
+    if tool == "WebFetch":
+        host = re.sub(r"^https?://", "", str(inp.get("url") or "")).split("/")[0]
+        return f"Reading {_short(host, 40) or 'a web page'}"
+    if tool in ("Task", "Agent"):
+        return "Handing part of it to a helper"
+    if tool in ("TodoWrite", "TaskCreate", "TaskUpdate"):
+        return "Updating its to-do list"
+    if tool == "AskUserQuestion":
+        return "Has a question for you"
+    if tool == "ExitPlanMode":
+        return "Has a plan for you to check"
+    return f"Using {_short(str(tool).replace('mcp__', '').replace('__', ' '), 40)}"
+
+
+def last_reply(transcript_path, limit=140):
+    """The first sentence or so of Claude's last reply in a Claude Code transcript (only from ~/.claude)."""
+    try:
+        real = os.path.realpath(transcript_path or "")
+        if not real.endswith(".jsonl") or not real.startswith(os.path.realpath(os.path.expanduser("~/.claude")) + os.sep):
+            return ""
+        with open(real, "rb") as f:
+            f.seek(0, 2); size = f.tell(); f.seek(max(0, size - 400_000))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+        for line in reversed(lines):
+            try: rec = json.loads(line)
+            except ValueError: continue
+            msg = rec.get("message") or {}
+            if rec.get("type") != "assistant" or not isinstance(msg.get("content"), list):
+                continue
+            text = " ".join(b.get("text", "") for b in msg["content"] if isinstance(b, dict) and b.get("type") == "text").strip()
+            if text:
+                text = re.sub(r"[*_`#>]+", "", text)
+                first = re.split(r"(?<=[.!?])\s", " ".join(text.split()), maxsplit=1)[0]
+                return _short(first, limit)
+    except Exception:
+        pass
+    return ""
+
+
 def desktop_clips():
     try:
         with open(DESKTOP_CLIPS) as f:
@@ -783,13 +852,16 @@ class Buddy:
         log.info("restored %d session(s) from %s", len(self.sessions), STATE_FILE)
 
     # ---- session bookkeeping ----
-    def hook(self, p):
+    def hook(self, p, app=None):
         ev, sid, now = p.get("hook_event_name", ""), p.get("session_id", "?"), time.time()
         event = None
+        say = None                                    # what to put in Desktop Lump's speech bubble, if anything
         with self.lock:
             fresh = now - self.last_event > HELLO_AFTER
             self.last_event = now
             s = self.sessions.setdefault(sid, {"state": "idle", "t": now, "cwd": p.get("cwd", "")})
+            if app and APP_ID.fullmatch(app) and "app" not in s:
+                s["app"] = app                          # the terminal (or editor) it runs in, for "Show me"
             if p.get("transcript_path"):
                 s["account"] = account_of_config(p["transcript_path"])
             state = None
@@ -823,8 +895,10 @@ class Buddy:
                 state = "done"
             elif ev == "SessionEnd":
                 self.sessions.pop(sid, None)
+            prev = s.get("state")
             if state:
                 self._set(s, state, now)
+            say = self.narration(p, ev, s, prev, state)
             if event == "oops":
                 # a failure never interrupts "needs you": only show it while he's working
                 if self.base_locked(now) == "working":
@@ -842,6 +916,58 @@ class Buddy:
             self.event(event)
             self.sound({"hello": "hello", "oops": "uh_oh"}[event])
         self.update()
+        if say:
+            self.narrate(*say)
+
+    def narration(self, p, ev, s, prev, state):
+        """(text, kind, jump) for Desktop Lump's bubble, or None. Called with the lock held."""
+        cwd = p.get("cwd") or s.get("cwd") or ""
+        if os.path.realpath(cwd or "/") == os.path.realpath(QUICK_ASK_DIR):
+            return None                                  # the fox's own quick question: the bubble has the answer already
+        project = os.path.basename(cwd.rstrip("/")) or "Claude"
+        jump = {"app": s["app"]} if s.get("app") else None
+        if ev == "UserPromptSubmit":
+            return (f"{project}: on it", "working", jump)
+        if ev == "PreToolUse":
+            return (f"{project}: {narrate_tool(p.get('tool_name'), p.get('tool_input'))}", "needs" if state == "alert" else "working", jump)
+        if ev == "PermissionRequest" or (ev == "Notification" and state == "alert"):
+            if p.get("message"): why = p["message"]                     # Claude Code's own words ("Claude needs your permission to use Bash")
+            elif p.get("tool_name"): why = "needs your OK: " + narrate_tool(p.get("tool_name"), p.get("tool_input"))
+            else: why = "needs you"
+            return (f"{project}: {_short(why, 110)}", "needs", jump)
+        if ev == "Elicitation":
+            return (f"{project}: has a question for you", "needs", jump)
+        if ev == "Stop" and prev != "done":
+            reply = last_reply(p.get("transcript_path"))
+            return (f"{project} is done" + (f": {reply}" if reply else "."), "done", jump)
+        if ev == "StopFailure":
+            return (f"{project} stopped with an error.", "done", jump)
+        return None
+
+    def narrate(self, text, kind, jump=None):
+        """Send a line to Desktop Lump's speech bubble. Busy chatter is thinned out; needs-you and done always go."""
+        if getattr(self.dev, "link", None) != "desktop":
+            return
+        now = time.time()
+        if kind == "working":
+            last = getattr(self, "_last_narration", ("", 0.0))
+            if text == last[0]:
+                return
+            wait = 2.5 - (now - last[1])
+            if wait > 0:                                # too soon after the last line: show the latest one when it's time
+                self._narration_next = (text, kind, jump)
+                if not getattr(self, "_narration_timer", None):
+                    def later():
+                        self._narration_timer = None
+                        nxt, self._narration_next = getattr(self, "_narration_next", None), None
+                        if nxt: self.narrate(*nxt)
+                    self._narration_timer = threading.Timer(wait, later); self._narration_timer.daemon = True; self._narration_timer.start()
+                return
+            self._last_narration = (text, now)
+        else:
+            self._narration_next = None                 # needs-you / done supersede any busy line still waiting
+            self._last_narration = (text, now)
+        self.dev.send("n " + json.dumps({"text": text, "kind": kind, "jump": jump}, ensure_ascii=False), quiet=True)
 
     def external(self, sid, state, stale=None, account=PERSONAL):
         """State from a non-hook source (the app watcher for Chat and Cowork)."""
@@ -855,10 +981,15 @@ class Buddy:
                 s.pop("unseen", None)           # a new message in that conversation: result seen
             if state == "working" and s.get("state") in ("idle", "done"):
                 self.last_active = now          # you just sent a message there
+            prev = s.get("state")
             self._set(s, state, now)
             s["stale"] = stale
             log.info("app %s -> %s", sid[:40], state)
         self.update()
+        if state != prev and state in ("alert", "done"):
+            where = "claude.ai" if sid.startswith("web:") else "the Claude app"
+            jump = {"web": sid[4:]} if sid.startswith("web:") else {"app": CLAUDE_APP_ID}
+            self.narrate(f"A chat in {where} needs you." if state == "alert" else f"A chat in {where} is done.", "needs" if state == "alert" else "done", jump)
 
     def forget(self, sid):
         with self.lock:
@@ -1697,16 +1828,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         if self.path == "/hook":
             self._reply(204)                      # answer first so the hook never waits on us
-            try: buddy.hook(json.loads(body or b"{}"))
+            try: buddy.hook(json.loads(body or b"{}"), app=(self.headers.get("X-Term-App") or "").strip())
             except Exception as e: log.info("bad hook payload: %s", e)
         elif self.path == "/app":
             self._reply(204)
             try: buddy.app.snapshot(json.loads(body or b"{}"))
             except Exception as e: log.info("bad app snapshot: %s", e)
         elif self.path == "/browser":             # claude.ai in Chrome, from the tools/browserwatch extension
-            self._reply(204)
             try: buddy.browser.snapshot(json.loads(body or b"{}"))
             except Exception as e: log.info("bad browser snapshot: %s", e)
+            want = getattr(buddy, "focus_tab", None)     # Desktop Lump's "Show me": the extension brings that tab forward
+            if want and time.time() - want[1] < 15:
+                buddy.focus_tab = None
+                self._reply(200, json.dumps({"focus": want[0]}).encode(), "application/json")
+            else:
+                self._reply(204)
+        elif self.path == "/jump":                # from Desktop Lump: bring this claude.ai chat's tab forward
+            self._reply(204)
+            try:
+                key = (json.loads(body or b"{}").get("web") or "")[:60]
+                if key: buddy.focus_tab = (key, time.time())
+            except Exception as e: log.info("bad jump: %s", e)
         elif self.path == "/usage":               # from tools/statusline.sh (status line JSON)
             self._reply(204)
             try:

@@ -7,7 +7,9 @@
 // moods, colours, corner counts, gags, sounds and the bridge's automatic clips all work unchanged.
 // Without the bridge he goes his own way: asleep, fidgeting, at night under his blanket.
 //
-// Click him to tap the glass. Drag him anywhere. Right-click for size, look, corner and the clip library.
+// Click him to tap the glass; double-click to ask him a question. Drag him anywhere. Right-click for
+// size, look, corner and the clip library. His speech bubble says what Claude is doing (the bridge sends
+// "n <json>" lines), with "Show me" to bring that session forward.
 // Clicks on the empty space around him go through to whatever is underneath.
 // Build and launch: zsh tools/desklump/build.sh
 
@@ -143,7 +145,9 @@ final class BoardLink {
 /// Sits on top of the web view and takes every click: a click is a tap, a drag moves him.
 final class GrabView: NSView {
     var onTap: (() -> Void)?
+    var onDoubleClick: (() -> Void)?
     var onMenu: ((NSEvent) -> Void)?
+    private var pendingTap: DispatchWorkItem?
     var onMoved: (() -> Void)?
     var dragging = false
     private var downAt = NSPoint.zero, startOrigin = NSPoint.zero
@@ -164,7 +168,13 @@ final class GrabView: NSView {
     }
     override func mouseUp(with e: NSEvent) {
         if e.modifierFlags.contains(.control) { return }
-        if dragging { dragging = false; NSCursor.pop(); onMoved?() } else { onTap?() }
+        if dragging { dragging = false; NSCursor.pop(); onMoved?(); return }
+        // one click is a tap, two ask a question: wait a double-click's length before tapping
+        pendingTap?.cancel(); pendingTap = nil
+        if e.clickCount >= 2 { onDoubleClick?(); return }
+        let tap = DispatchWorkItem { [weak self] in self?.onTap?() }
+        pendingTap = tap
+        DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: tap)
     }
     override func rightMouseDown(with e: NSEvent) { onMenu?(e) }
 }
@@ -173,6 +183,92 @@ final class LumpPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
+
+// MARK: - the speech bubble
+
+/// The bubble's own small window, beside him. Unlike his, it can take the keyboard (for typing a
+/// question) without making Desktop Lump the active app, like Spotlight's.
+final class BubblePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+/// Answers a quick question with Claude Code in print mode (claude -p), with every tool switched off:
+/// it can only reply, never run a command or touch a file. It runs in ~/.desk-buddy/ask, which the
+/// bridge knows not to narrate, and nothing is saved to your session history.
+final class Asker {
+    private var running: Process?
+    private lazy var claudePath: String? = Asker.findClaude()
+
+    static func findClaude() -> String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for p in ["\(home)/.claude/local/claude", "\(home)/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+            where FileManager.default.isExecutableFile(atPath: p) { return p }
+        // wherever your login shell finds it
+        let sh = Process(), out = Pipe()
+        sh.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        sh.arguments = ["-lc", "command -v claude"]
+        sh.standardOutput = out; sh.standardError = FileHandle.nullDevice; sh.standardInput = FileHandle.nullDevice
+        do { try sh.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        sh.waitUntilExit()
+        let path = (String(data: data, encoding: .utf8) ?? "").split(separator: "\n").last.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
+        return path.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: path) ? path : nil
+    }
+
+    func ask(_ question: String, done: @escaping (String, Bool) -> Void) {
+        cancel()
+        guard let claude = claudePath else {
+            done("I answer questions with Claude Code, and I can't find it on this Mac. Install it (claude.com/claude-code), then ask me again.", false); return
+        }
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/ask")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let p = Process(), out = Pipe(), err = Pipe()
+        p.executableURL = URL(fileURLWithPath: claude)
+        p.arguments = ["-p", question, "--tools", "", "--no-session-persistence", "--output-format", "text",
+                       "--append-system-prompt", "Your answer appears in a small speech bubble beside a cartoon fox on the user's desktop. Answer directly and briefly: a few sentences or a short list, under 150 words, unless they ask for more."]
+        p.currentDirectoryURL = dir
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = (env["PATH"] ?? "/usr/bin:/bin") + ":/opt/homebrew/bin:/usr/local/bin"
+        p.environment = env
+        p.standardOutput = out; p.standardError = err; p.standardInput = FileHandle.nullDevice
+        running = p
+        DispatchQueue.global().async {
+            do { try p.run() } catch {
+                DispatchQueue.main.async { if self.running === p { self.running = nil; done("Couldn't start Claude Code: \(error.localizedDescription)", false) } }
+                return
+            }
+            let giveUp = DispatchWorkItem { if p.isRunning { p.terminate() } }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 120, execute: giveUp)
+            var errData = Data()
+            let errDone = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async { errData = err.fileHandleForReading.readDataToEndOfFile(); errDone.signal() }
+            let outData = out.fileHandleForReading.readDataToEndOfFile()
+            errDone.wait()
+            p.waitUntilExit(); giveUp.cancel()
+            let text = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let problem = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            DispatchQueue.main.async {
+                guard self.running === p else { return }          // cancelled, or a newer question took over
+                self.running = nil
+                if p.terminationReason == .uncaughtSignal { done("That was taking too long, so I gave up. Try again?", false) }
+                else if p.terminationStatus == 0 && !text.isEmpty { done(text, true) }
+                else { done(problem.isEmpty ? "Claude Code didn't answer (it exited with \(p.terminationStatus))." : String(problem.prefix(300)), false) }
+            }
+        }
+    }
+
+    func cancel() {
+        if let p = running, p.isRunning { p.terminate() }
+        running = nil
+    }
+}
+
+/// TERM_PROGRAM names (what the hook sends when there's no bundle id) to the apps they mean.
+let TERMINAL_APPS: [String: String] = [
+    "Apple_Terminal": "com.apple.Terminal", "iTerm.app": "com.googlecode.iterm2", "vscode": "com.microsoft.VSCode",
+    "WarpTerminal": "dev.warp.Warp-Stable", "ghostty": "com.mitchellh.ghostty", "WezTerm": "com.github.wez.wezterm",
+]
 
 // MARK: - app
 
@@ -189,6 +285,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     var hoverTimer: Timer?
     var hiddenByUser = false
     var bridgeConnected = false         // the link's state, kept on the main thread
+    var bubble: BubblePanel!
+    var bubbleWeb: WKWebView!
+    var bubbleReady = false
+    var bubbleQueue: [String] = []
+    var bubbleSize = NSSize(width: 324, height: 90)
+    var bubbleMode = "none"             // none | say | ask | answer
+    var bubbleJump: [String: Any]?
+    var bubbleKind = ""                 // what the bubble is saying now: working | needs | done | info
+    var bubblePlaced = ""
+    var offlineRules: WKContentRuleList?
+    let asker = Asker()
     let prefs = UserDefaults.standard
 
     var side: CGFloat {
@@ -207,6 +314,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         get { let v = prefs.string(forKey: "character") ?? "lump"; return CHARACTER_FILES[v] == nil ? "lump" : v }
         set { prefs.set(newValue, forKey: "character") }
     }
+    var narrate: String {               // what the bubble says about Claude: "all", "important" (needs you / done) or "off"
+        get { let v = prefs.string(forKey: "narrate") ?? "all"; return ["all", "important", "off"].contains(v) ? v : "all" }
+        set { prefs.set(newValue, forKey: "narrate") }
+    }
     var snap: Bool {                    // after a drag, slide into the nearest corner
         get { prefs.object(forKey: "snap") == nil ? true : prefs.bool(forKey: "snap") }
         set { prefs.set(newValue, forKey: "snap") }
@@ -218,7 +329,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         self.webDir = webDir
         makeWindow(webDir)
-        link.onLine = { [weak self] line in self?.toLump(line) }
+        link.onLine = { [weak self] line in
+            if line.hasPrefix("n ") { self?.narration(String(line.dropFirst(2))) } else { self?.toLump(line) }
+        }
         link.onChange = { [weak self] on in self?.bridgeConnected = on }
         link.start()
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
@@ -258,6 +371,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         grab = GrabView(frame: content.bounds)
         grab.autoresizingMask = [.width, .height]
         grab.onTap = { [weak self] in self?.js("desk.tap()") }
+        grab.onDoubleClick = { [weak self] in self?.openAsk() }
         grab.onMenu = { [weak self] e in guard let self = self else { return }; NSMenu.popUpContextMenu(self.menu(), with: e, for: self.grab) }
         grab.onMoved = { [weak self] in self?.moved() }
         content.addSubview(grab)
@@ -269,9 +383,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let rules = #"[{"trigger":{"url-filter":"^(https?|wss?|ftp)://"},"action":{"type":"block"}}]"#
         WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "desklump-offline", encodedContentRuleList: rules) { [weak self] list, err in
             guard let self = self else { return }
-            if let list = list { self.web.configuration.userContentController.add(list) }
+            if let list = list { self.web.configuration.userContentController.add(list); self.offlineRules = list }
             else { NSLog("desklump: couldn't install the offline rule: \(String(describing: err))") }
             self.loadCharacter()
+            self.makeBubble()
         }
         clampOnScreen()
         panel.orderFrontRegardless()
@@ -297,6 +412,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func applyLayer() {
         // On the desktop: just above the desktop icons, so ordinary windows cover him like they'd cover a widget.
         panel.level = onDesktop ? NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1) : .floating
+        bubble?.level = .floating                // his bubble always floats, even when he sits on the desktop
     }
 
     func visibleFrame(for point: NSPoint? = nil) -> NSRect {
@@ -316,7 +432,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         guard prefs.object(forKey: "x") != nil else { return nil }
         return NSPoint(x: prefs.double(forKey: "x"), y: prefs.double(forKey: "y"))
     }
-    func saveOrigin() { prefs.set(Double(panel.frame.minX), forKey: "x"); prefs.set(Double(panel.frame.minY), forKey: "y") }
+    func saveOrigin() { prefs.set(Double(panel.frame.minX), forKey: "x"); prefs.set(Double(panel.frame.minY), forKey: "y"); placeBubble() }
 
     func moved() {
         if snap {
@@ -372,6 +488,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     func userContentController(_ uc: WKUserContentController, didReceive m: WKScriptMessage) {
         guard let body = m.body as? [String: Any] else { return }
+        if m.name == "bubble" { fromBubble(body); return }
         if let s = body["say"] as? String { link.send(s) }
         if body["ready"] as? Bool == true {
             ready = true
@@ -420,6 +537,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func menu() -> NSMenu {
         let m = NSMenu()
         m.addItem(item(bridgeConnected ? "Connected to the bridge" : "On his own (the bridge isn't connected)", nil))
+        m.addItem(.separator())
+        m.addItem(item("Ask a Question… (or Double-Click Him)", #selector(askFromMenu)))
+        let talk = [("all", "Everything Claude Does"), ("important", "Only When Claude Needs Me or Finishes"), ("off", "Nothing")]
+        m.addItem(sub("Speech Bubble", talk.map { item($0.1, #selector(pickNarrate(_:)), on: narrate == $0.0, rep: $0.0) }))
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
         var gagItems = [item("A Random Gag", #selector(playNamed(_:)), rep: "tap"), NSMenuItem.separator()]
@@ -476,7 +597,137 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             } catch { NSLog("desklump: login item: \(error)") }
         }
     }
-    @objc func hideHim() { hiddenByUser = true; panel.orderOut(nil) }
+    @objc func hideHim() { hiddenByUser = true; panel.orderOut(nil); hideBubble() }
+    @objc func askFromMenu() { openAsk() }
+    @objc func pickNarrate(_ s: NSMenuItem) {
+        guard let v = s.representedObject as? String else { return }
+        narrate = v
+        if v == "off" && bubbleMode == "say" { hideBubble() }
+    }
+
+    // MARK: the bubble
+
+    func makeBubble() {
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(self, name: "bubble")
+        if let rules = offlineRules { config.userContentController.add(rules) }
+        bubble = BubblePanel(contentRect: NSRect(origin: .zero, size: NSSize(width: 324, height: 420)),
+                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        bubble.isOpaque = false
+        bubble.backgroundColor = .clear
+        bubble.hasShadow = false
+        bubble.hidesOnDeactivate = false
+        bubble.isReleasedWhenClosed = false
+        bubble.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+        bubble.level = .floating
+        bubbleWeb = WKWebView(frame: NSRect(x: 0, y: 0, width: 324, height: 420), configuration: config)
+        bubbleWeb.autoresizingMask = [.width, .height]
+        bubbleWeb.setValue(false, forKey: "drawsBackground")
+        if #available(macOS 12.0, *) { bubbleWeb.underPageBackgroundColor = .clear }
+        bubbleWeb.navigationDelegate = self
+        bubble.contentView = bubbleWeb
+        bubbleWeb.loadFileURL(webDir.appendingPathComponent("bubble.html"), allowingReadAccessTo: webDir)
+    }
+
+    func bubbleJS(_ code: String) {
+        if bubbleReady { bubbleWeb.evaluateJavaScript(code, completionHandler: nil) } else { bubbleQueue.append(code) }
+    }
+    func jsonLiteral(_ v: Any) -> String {
+        guard let d = try? JSONSerialization.data(withJSONObject: [v]), let s = String(data: d, encoding: .utf8) else { return "null" }
+        return "\(s)[0]"
+    }
+
+    /// A line from the bridge about what Claude is doing.
+    func narration(_ json: String) {
+        guard let data = json.data(using: .utf8), let n = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let text = n["text"] as? String, !text.isEmpty else { return }
+        let kind = (n["kind"] as? String) ?? "info"
+        if narrate == "off" { return }
+        if narrate == "important" && kind == "working" {
+            if bubbleMode == "say" && bubbleKind == "needs" { hideBubble() }      // Claude's moving again: that's been dealt with
+            return
+        }
+        if bubbleMode == "ask" || bubbleMode == "answer" || hiddenByUser || bubble == nil { return }   // you're busy with him: don't interrupt
+        bubbleJump = n["jump"] as? [String: Any]
+        bubbleKind = kind
+        bubbleMode = "say"
+        let show: [String: Any] = ["text": String(text.prefix(300)), "kind": kind, "jump": bubbleJump != nil]
+        bubbleJS("bubble.show(\(jsonLiteral(show)))")
+        showBubble(key: false)
+    }
+
+    func openAsk() {
+        guard bubble != nil else { return }
+        bubbleMode = "ask"; bubbleJump = nil
+        bubbleJS("bubble.ask()")
+        showBubble(key: true)
+    }
+
+    func showBubble(key: Bool) {
+        placeBubble()
+        if key { bubble.makeKeyAndOrderFront(nil); bubble.makeFirstResponder(bubbleWeb) } else { bubble.orderFrontRegardless() }
+    }
+
+    func hideBubble() {
+        if bubbleMode == "answer" { asker.cancel() }
+        bubbleMode = "none"; bubbleJump = nil
+        bubble?.orderOut(nil)
+    }
+
+    /// Beside him, towards the middle of the screen, above him if there's room (else below).
+    func placeBubble() {
+        guard let bubble = bubble, let panel = panel else { return }
+        let f = panel.frame, vf = visibleFrame(), w = bubbleSize.width, h = bubbleSize.height
+        let right = f.midX > vf.midX
+        var x = right ? f.maxX - w + 10 : f.minX - 10
+        x = min(max(x, vf.minX + 4), vf.maxX - w - 4)
+        var y = f.maxY - 14, below = false
+        if y + h > vf.maxY { y = f.minY - h + 14; below = true }
+        y = min(max(y, vf.minY + 4), vf.maxY - h - 4)
+        bubble.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
+        let place = "\(right ? "right" : "left") \(below)"
+        if place != bubblePlaced { bubblePlaced = place; bubbleJS("bubble.place('\(right ? "right" : "left")', \(below))") }
+    }
+
+    func fromBubble(_ body: [String: Any]) {
+        if let size = body["size"] as? [String: Any], let w = (size["w"] as? NSNumber)?.doubleValue, let h = (size["h"] as? NSNumber)?.doubleValue {
+            if !bubbleReady { bubbleReady = true; bubbleQueue.forEach { bubbleWeb.evaluateJavaScript($0, completionHandler: nil) }; bubbleQueue.removeAll() }
+            bubbleSize = NSSize(width: max(200, min(w, 420)), height: max(40, min(h, 420)))
+            if bubble.isVisible { placeBubble() }
+        }
+        if let action = body["action"] as? String {
+            if action == "jump" { jump(bubbleJump) }
+            if action == "dismiss" || action == "jump" { hideBubble() }
+        }
+        if let q = body["ask"] as? String, !q.isEmpty {
+            bubbleMode = "answer"
+            let question = String(q.prefix(4000))
+            bubbleJS("bubble.thinking(\(jsonLiteral(question)))")
+            asker.ask(question) { [weak self] text, ok in
+                guard let self = self, self.bubbleMode == "answer" else { return }     // dismissed while thinking
+                self.bubbleJS(ok ? "bubble.answer(\(self.jsonLiteral(question)), \(self.jsonLiteral(text)))"
+                                 : "bubble.error(\(self.jsonLiteral(question)), \(self.jsonLiteral(text)))")
+            }
+        }
+        if let text = body["copy"] as? String, !text.isEmpty {
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    /// "Show me": bring forward the app the session runs in, or ask the browser extension for the chat's tab.
+    func jump(_ j: [String: Any]?) {
+        guard let j = j else { return }
+        if let raw = j["app"] as? String {
+            let id = TERMINAL_APPS[raw] ?? raw
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return }
+            let cfg = NSWorkspace.OpenConfiguration(); cfg.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: cfg, completionHandler: nil)
+        } else if let key = j["web"] as? String, let url = URL(string: BRIDGE + "/jump") {
+            var req = URLRequest(url: url); req.httpMethod = "POST"; req.timeoutInterval = 3
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["web": key])
+            URLSession.shared.dataTask(with: req).resume()
+        }
+    }
     @objc func quit() { NSApp.terminate(nil) }
 }
 

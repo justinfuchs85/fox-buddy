@@ -25,7 +25,21 @@ function report() {
   }
   save();
   const body = JSON.stringify({ trusted: true, copies: [{ account: 'personal', pages, focused, sidebar: [], tabs: [], labels: [] }] });
-  fetch(BRIDGE, { method: 'POST', body, headers: { 'Content-Type': 'application/json' } }).catch(() => {});   // bridge not running: fine
+  fetch(BRIDGE, { method: 'POST', body, headers: { 'Content-Type': 'application/json' } })
+    .then(r => r.status === 200 ? r.json() : null)
+    .then(j => { if (j && typeof j.focus === 'string') focus(j.focus); })
+    .catch(() => {});                                                       // bridge not running: fine
+}
+
+// Desktop Lump's "Show me": bring the tab with this chat to the front, and its window with it.
+function focus(name) {
+  for (const [id, r] of tabs) {
+    if (r.title !== name) continue;
+    const tabId = Number(id);
+    Promise.resolve(api.tabs.update(tabId, { active: true })).catch(() => {});
+    if (r.windowId !== undefined) Promise.resolve(api.windows.update(r.windowId, { focused: true })).catch(() => {});
+    return;
+  }
 }
 
 api.runtime.onMessage.addListener((msg, sender) => {
@@ -33,7 +47,7 @@ api.runtime.onMessage.addListener((msg, sender) => {
   if (id === undefined) return;
   loaded.then(() => {
     if (msg.gone) tabs.delete(String(id));
-    else tabs.set(String(id), { title: msg.title, page: msg.page || {}, focused: !!msg.focused, t: Date.now() });
+    else tabs.set(String(id), { title: msg.title, page: msg.page || {}, focused: !!msg.focused, windowId: sender.tab.windowId, t: Date.now() });
     report();
   });
 });

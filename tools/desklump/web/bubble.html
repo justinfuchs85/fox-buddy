@@ -1,0 +1,125 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Bubble</title>
+<style>
+  :root { --bg: #FFFDF8; --ink: #2A211D; --muted: #7A6F68; --line: rgba(42,33,29,.12); --accent: #E8743B;
+          --needs: #E79A1B; --done: #3BAA6B; --code: rgba(42,33,29,.07); --shadow: 0 6px 22px rgba(0,0,0,.22), 0 1px 3px rgba(0,0,0,.15); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #2B2522; --ink: #F5EDE6; --muted: #B5A89F; --line: rgba(255,241,220,.14); --code: rgba(255,241,220,.08); --shadow: 0 6px 22px rgba(0,0,0,.5); }
+  }
+  html, body { margin: 0; background: transparent; font: 13.5px/1.42 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; color: var(--ink); -webkit-user-select: text; user-select: text; overflow: hidden; }
+  #wrap { padding: 10px 12px 18px; }                    /* room for the shadow and the tail */
+  #wrap.below { padding: 18px 12px 10px; }
+  #card { position: relative; background: var(--bg); border-radius: 14px; box-shadow: var(--shadow); padding: 12px 14px; border-left: 4px solid transparent; }
+  #card.needs { border-left-color: var(--needs); }
+  #card.done { border-left-color: var(--done); }
+  #card::after { content: ""; position: absolute; bottom: -9px; width: 18px; height: 18px; background: var(--bg); transform: rotate(45deg); border-radius: 0 0 4px 0; box-shadow: 3px 3px 5px rgba(0,0,0,.08); }
+  #wrap.right #card::after { right: 34px; } #wrap.left #card::after { left: 34px; }
+  #wrap.below #card::after { bottom: auto; top: -9px; border-radius: 4px 0 0 0; box-shadow: -2px -2px 4px rgba(0,0,0,.06); }
+  #close { position: absolute; top: 6px; right: 8px; border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 2px 4px; line-height: 1; }
+  #close:hover { color: var(--ink); }
+  #text { padding-right: 16px; word-wrap: break-word; }
+  #q { color: var(--muted); font-size: 12.5px; margin: 0 18px 6px 0; }
+  #answer { max-height: 300px; overflow-y: auto; padding-right: 4px; }
+  #answer p { margin: 0 0 8px; } #answer p:last-child { margin-bottom: 0; }
+  #answer ul, #answer ol { margin: 0 0 8px; padding-left: 20px; }
+  code { background: var(--code); border-radius: 4px; padding: 0 4px; font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; }
+  pre { background: var(--code); border-radius: 8px; padding: 8px 10px; overflow-x: auto; margin: 0 0 8px; }
+  pre code { background: none; padding: 0; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  button.act { border: 0; border-radius: 8px; padding: 6px 12px; font: 600 12.5px -apple-system, sans-serif; cursor: pointer; background: var(--code); color: var(--ink); }
+  button.act.primary { background: var(--accent); color: #fff; }
+  button.act:hover { filter: brightness(1.05); }
+  #askBox { padding-top: 16px; }
+  textarea { width: 100%; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: inherit; color: var(--ink); background: transparent; outline: none; min-height: 58px; }
+  textarea:focus { border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+  .dots span { display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--accent); animation: bob 1s infinite ease-in-out; }
+  .dots span:nth-child(2) { animation-delay: .15s; } .dots span:nth-child(3) { animation-delay: .3s; }
+  @keyframes bob { 0%, 80%, 100% { transform: translateY(0); opacity: .5 } 40% { transform: translateY(-5px); opacity: 1 } }
+  [hidden] { display: none !important; }
+</style></head>
+<body>
+<div id="wrap" class="right">
+  <div id="card">
+    <button id="close" title="Close">×</button>
+    <div id="say"><div id="text"></div><div class="actions" id="sayActions" hidden><button class="act primary" id="jump">Show me</button></div></div>
+    <div id="askBox" hidden>
+      <textarea id="input" placeholder="Ask the fox anything…" rows="2"></textarea>
+      <div class="actions"><button class="act primary" id="send">Ask</button></div>
+      <div class="hint">Return to ask · Shift-Return for a new line · Esc to close</div>
+    </div>
+    <div id="answerBox" hidden>
+      <div id="q"></div>
+      <div id="thinking" class="dots" hidden><span></span><span></span><span></span></div>
+      <div id="answer"></div>
+      <div class="actions" id="answerActions" hidden><button class="act" id="copy">Copy</button><button class="act primary" id="again">Ask another</button></div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const post = m => { try { window.webkit.messageHandlers.bubble.postMessage(m); } catch (e) { (window.__posted = window.__posted || []).push(m); } };
+  let ttlTimer = 0, hovering = false, lastAnswer = '';
+
+  // Everything shown comes from outside (a command, Claude's reply): it is always treated as text.
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const inline = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  function markdown(src) {                         // just enough: paragraphs, lists, **bold**, `code`, ``` blocks
+    const out = [], parts = String(src).split(/```[a-zA-Z0-9]*\n?/);
+    parts.forEach((part, i) => {
+      if (i % 2) { out.push('<pre><code>' + esc(part.replace(/\n$/, '')) + '</code></pre>'); return; }
+      for (const block of part.split(/\n\s*\n/)) {
+        const lines = block.split('\n').filter(l => l.trim());
+        if (!lines.length) continue;
+        if (lines.every(l => /^\s*([-*•]|\d+[.)])\s+/.test(l))) {
+          const ordered = /^\s*\d/.test(lines[0]);
+          out.push((ordered ? '<ol>' : '<ul>') + lines.map(l => '<li>' + inline(l.replace(/^\s*([-*•]|\d+[.)])\s+/, '')) + '</li>').join('') + (ordered ? '</ol>' : '</ul>'));
+        } else out.push('<p>' + lines.map(l => inline(l.replace(/^#+\s*/, ''))).join('<br>') + '</p>');
+      }
+    });
+    return out.join('');
+  }
+
+  function mode(m) {
+    $('say').hidden = m !== 'say'; $('askBox').hidden = m !== 'ask'; $('answerBox').hidden = m !== 'answer';
+    document.body.dataset.mode = m; report();
+  }
+  function report() { requestAnimationFrame(() => { const r = $('wrap').getBoundingClientRect(); post({ size: { w: Math.ceil(r.width), h: Math.ceil(r.height) } }); }); }
+  new ResizeObserver(report).observe($('wrap'));
+  function timeout(sec) {
+    clearTimeout(ttlTimer);
+    if (sec > 0) ttlTimer = setTimeout(function tick() { if (hovering) { ttlTimer = setTimeout(tick, 1000); return; } post({ action: 'dismiss' }); }, sec * 1000);
+  }
+  $('card').addEventListener('mouseenter', () => hovering = true);
+  $('card').addEventListener('mouseleave', () => hovering = false);
+
+  window.bubble = {
+    place(side, below) { $('wrap').className = (side === 'left' ? 'left' : 'right') + (below ? ' below' : ''); report(); },
+    show(m) {                                       // { text, kind: working | needs | done | info, jump }
+      $('card').className = m.kind === 'needs' ? 'needs' : m.kind === 'done' ? 'done' : '';
+      $('text').innerHTML = inline(m.text || '');
+      $('sayActions').hidden = !m.jump;
+      mode('say');
+      timeout(m.kind === 'needs' ? 0 : m.kind === 'done' ? 14 : 6);
+    },
+    ask() { clearTimeout(ttlTimer); $('card').className = ''; $('input').value = ''; mode('ask'); setTimeout(() => $('input').focus(), 30); },
+    thinking(q) { clearTimeout(ttlTimer); $('card').className = ''; $('q').textContent = q; $('answer').innerHTML = ''; $('thinking').hidden = false; $('answerActions').hidden = true; mode('answer'); },
+    answer(q, text) { lastAnswer = text; $('copy').hidden = false; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = markdown(text); $('answerActions').hidden = false; mode('answer'); },
+    error(q, text) { lastAnswer = ''; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = '<p>' + esc(text) + '</p>'; $('answerActions').hidden = false; $('copy').hidden = true; mode('answer'); },
+  };
+  $('close').onclick = () => post({ action: 'dismiss' });
+  $('jump').onclick = () => post({ action: 'jump' });
+  $('copy').onclick = () => { post({ copy: lastAnswer }); $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy', 1200); };
+  $('again').onclick = () => { $('copy').hidden = false; window.bubble.ask(); };
+  const send = () => { const q = $('input').value.trim(); if (q) post({ ask: q.slice(0, 4000) }); };
+  $('send').onclick = send;
+  $('input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === 'Escape') { e.stopPropagation(); post({ action: 'dismiss' }); }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') post({ action: 'dismiss' }); });
+  mode('say');
+})();
+</script>
+</body></html>

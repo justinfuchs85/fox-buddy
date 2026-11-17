@@ -16,7 +16,7 @@ trap 'rm -rf "$BUILD"' EXIT
 WEB="$BUILD/web"; mkdir -p "$WEB"
 # (lump.html without its Google Fonts links: the app makes no internet requests at all)
 grep -v -E "fonts\.(googleapis|gstatic)\.com" "$ROOT/design/lump.html" > "$WEB/lump.html"
-cp "$ROOT/design/clip_kit.js" "$HERE/web/start.js" "$HERE/web/desktop.js" "$WEB/"
+cp "$ROOT/design/clip_kit.js" "$HERE/web/start.js" "$HERE/web/desktop.js" "$HERE/web/bubble.html" "$WEB/"
 for f in "$ROOT"/design/clips/*.js(N); do
   print -r -- "try {"
   cat "$f"

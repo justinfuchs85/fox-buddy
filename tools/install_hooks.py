@@ -13,7 +13,10 @@ import argparse, json, os, shutil, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNTIME = os.path.expanduser("~/.desk-buddy")
+# X-Term-App: which app the session runs in (macOS gives every process a terminal starts its bundle id),
+# so Desktop Lump's "Show me" can bring that app forward.
 HOOK_CMD = ("curl -s -m 1 -o /dev/null -H 'Content-Type: application/json' "
+            "-H \"X-Term-App: ${__CFBundleIdentifier:-$TERM_PROGRAM}\" "
             "--data-binary @- http://127.0.0.1:47823/hook || true")
 # events without a tool name take no matcher
 EVENTS = {"SessionStart": "*", "UserPromptSubmit": None, "PreToolUse": "*", "PermissionRequest": "*",
@@ -50,6 +53,12 @@ def main():
                 changed.append(event)
                 if kept: hooks[event] = kept
                 else: hooks.pop(event, None)
+        elif any(ours(g) for g in groups):          # installed before: bring its command up to date
+            for g in groups:
+                for h in g.get("hooks", []):
+                    if MARK in (h.get("command") or "") and "/hook" in h["command"] and h["command"] != HOOK_CMD:
+                        h["command"] = HOOK_CMD
+                        if event not in changed: changed.append(event)
         elif not any(ours(g) for g in groups):
             group = {"hooks": [{"type": "command", "command": HOOK_CMD, "async": True, "timeout": 5}]}
             if matcher: group = {"matcher": matcher, **group}

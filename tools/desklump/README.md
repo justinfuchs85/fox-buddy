@@ -48,6 +48,19 @@ Using claude.ai in Chrome or Safari instead of the desktop app? Load the extensi
 - **Click** him to tap the glass. You get a gag. If Claude needs you, it snoozes the nagging. If
   there are unread results, it marks them read. If a meeting alarm is going, it silences it.
 - **Drag** him anywhere. By default he snaps into the nearest corner when you let go.
+- **Double-click** him to ask a question. You type it in his speech bubble and the answer shows up
+  there, with **Copy** and **Ask another**. It's answered by Claude Code in print mode (`claude -p`)
+  with every tool switched off, so it can only reply, never run anything or touch your files. It
+  needs Claude Code installed, counts towards your Claude usage, and isn't saved to your history.
+- **His speech bubble** says what Claude is doing: "desk-buddy: Running `npm test`", "needs your
+  permission to use Bash", and "done: …" with the first line of Claude's reply. Click **Show me** to
+  bring that session forward. For Claude Code that's the terminal app it runs in (iTerm, Terminal,
+  VS Code, Warp, Ghostty and so on); for claude.ai it's the right browser tab (through the browser
+  extension); for the Claude desktop app, it's the app. Right-click → **Speech Bubble** sets how much
+  he says: everything, only when Claude needs you or finishes, or nothing.
+
+  If you set up the hooks before this feature, re-run `python3 tools/install_hooks.py` once. It
+  updates them so the bridge knows which terminal each session is in.
 - **Right-click** for:
   - **Gags** and **Clips**: play any of them on demand
   - **Show Off**: cycles through every mood

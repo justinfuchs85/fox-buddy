@@ -5,7 +5,7 @@ Run with the bridge's own Python (it has pyserial):
 Nothing here touches the real board, speakers or ~/.desk-buddy: the bridge is pointed at a temp
 folder and given fake device / focus / sound objects.
 """
-import importlib.util, json, os, sys, tempfile, time, unittest
+import importlib.util, json, os, shutil, sys, tempfile, time, unittest
 from unittest import mock
 
 HOME = tempfile.mkdtemp(prefix="deskbuddy-test-")
@@ -828,3 +828,53 @@ class RequestGuardTest(unittest.TestCase):
         s = bridge.Sounds.__new__(bridge.Sounds)
         self.assertFalse(bridge.Sounds.play(s, "../../etc/x", force=True))
         self.assertFalse(bridge.Sounds.play_gag(s, "tap_../../x", force=True))
+
+
+class NarrationTest(BridgeTest):
+    """Desktop Lump's speech bubble: one short line per event, sent only to the desktop app."""
+
+    def setUp(self):
+        super().setUp()
+        self.b.dev.link = "desktop"
+
+    def said(self):
+        return [json.loads(s[2:]) for s in self.b.dev.sent if s.startswith("n ")]
+
+    def test_tool_lines(self):
+        self.assertEqual(bridge.narrate_tool("Bash", {"command": "npm test"}), "Running `npm test`")
+        self.assertEqual(bridge.narrate_tool("Edit", {"file_path": "/a/b/app.py"}), "Editing app.py")
+        self.assertEqual(bridge.narrate_tool("WebFetch", {"url": "https://example.com/x"}), "Reading example.com")
+        self.assertTrue(bridge.narrate_tool("Bash", {"command": "x" * 200}).endswith("…`"))
+
+    def test_needs_you_and_done_with_the_terminal_to_jump_to(self):
+        self.b.hook({"hook_event_name": "UserPromptSubmit", "session_id": "s", "cwd": "/p/shop"}, app="com.apple.Terminal")
+        self.b.hook({"hook_event_name": "Notification", "session_id": "s", "cwd": "/p/shop", "notification_type": "permission_prompt",
+                     "message": "Claude needs your permission to use Bash"})
+        self.b.hook({"hook_event_name": "Stop", "session_id": "s", "cwd": "/p/shop"})
+        lines = self.said()
+        self.assertEqual([l["kind"] for l in lines], ["working", "needs", "done"])
+        self.assertEqual(lines[1]["text"], "shop: Claude needs your permission to use Bash")
+        self.assertEqual(lines[2]["jump"], {"app": "com.apple.Terminal"})
+
+    def test_quick_questions_are_not_narrated(self):
+        self.b.hook({"hook_event_name": "UserPromptSubmit", "session_id": "q", "cwd": bridge.QUICK_ASK_DIR})
+        self.assertEqual(self.said(), [])
+
+    def test_only_to_the_desktop(self):
+        self.b.dev.link = "usb"
+        self.b.hook({"hook_event_name": "UserPromptSubmit", "session_id": "s", "cwd": "/p/shop"})
+        self.assertEqual(self.said(), [])
+
+    def test_bad_app_ids_are_ignored(self):
+        self.b.hook({"hook_event_name": "UserPromptSubmit", "session_id": "s", "cwd": "/p"}, app="$(rm -rf ~)")
+        self.assertNotIn("app", self.b.sessions["s"])
+
+    def test_last_reply_only_reads_claude_transcripts(self):
+        d = tempfile.mkdtemp(prefix="fakeclaude-"); self.addCleanup(shutil.rmtree, d, True)
+        t = os.path.join(d, "t.jsonl")
+        with open(t, "w") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "All **done**. More."}]}}) + "\n")
+        with mock.patch.object(bridge.os.path, "expanduser", lambda p: p.replace("~/.claude", d)):
+            self.assertEqual(bridge.last_reply(t), "All done.")
+            self.assertEqual(bridge.last_reply("/etc/passwd"), "")
+            self.assertEqual(bridge.last_reply(os.path.join(d, "..", "t.jsonl")), "")
