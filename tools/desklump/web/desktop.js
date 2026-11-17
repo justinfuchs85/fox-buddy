@@ -13,7 +13,7 @@
 //
 // The app passes lines in with desk.line(text) and gets ours from the "lump" message handler.
 (() => {
-  const L = window.__lump;
+  const L = window.__character || window.__lump;   // the fox (characters/fox) or the desk Lump (design/lump.html)
   const FPS = 24, ESCALATE_MS = 45000, LONGHAUL_MS = 10 * 60 * 1000, HOST_TIMEOUT_MS = 60000, OFFLINE_MARK_AFTER_MS = 8000;
   const NIGHT_FROM = 0, NIGHT_UNTIL = 8;
   const TANGERINE = [255, 122, 69];
@@ -81,7 +81,7 @@
   }
   function setTarget(m) { target = m; if (cur.kind === 'loop') settle(curMood); }
 
-  const GAGS = ['shock', 'moto', 'wolf', 'accordion', 'anvil', 'disco', 'banana', 'balloon', 'sneeze', 'moon', 'bomb'];
+  const GAGS = L.GAGS || ['shock', 'moto', 'wolf', 'accordion', 'anvil', 'disco', 'banana', 'balloon', 'sneeze', 'moon', 'bomb'];
   let lastGag = -1, lastTapClip = '';
   function pickTap() {
     const pool = GAGS.map((g, i) => i).filter(i => i !== lastGag);
@@ -317,5 +317,5 @@
   };
   settle('idle');
   rAF(frame);
-  tell({ ready: true, clips: window.desk.clips() });
+  tell({ ready: true, clips: window.desk.clips(), gags: GAGS, character: L.name || 'lump' });
 })();

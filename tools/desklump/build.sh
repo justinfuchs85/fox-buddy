@@ -24,6 +24,10 @@ for f in "$ROOT"/design/clips/*.js(N); do
   print -r -- "} catch (e) { console.error('clip ${f:t}: ' + e); }"
 done > "$WEB/clips.bundle.js"
 echo "$(ls "$ROOT"/design/clips/*.js | wc -l | tr -d ' ') clips bundled"
+# the fox (characters/fox): an original character, drawn by his own rig
+mkdir -p "$WEB/fox"
+cp "$ROOT/characters/fox/fox.js" "$ROOT/characters/fox/rig.js" "$ROOT/characters/fox/character.js" "$WEB/fox/"
+print -r -- '<!doctype html><meta charset="utf-8"><title>Fox</title><body></body>' > "$WEB/fox/fox.html"
 
 swiftc -O -swift-version 5 "$HERE/main.swift" -o "$BUILD/DesktopLump"
 

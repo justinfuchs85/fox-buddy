@@ -51,6 +51,7 @@ Using claude.ai in Chrome or Safari instead of the desktop app? Load the extensi
 - **Right-click** for:
   - **Gags** and **Clips**: play any of them on demand
   - **Show Off**: cycles through every mood
+  - **Character**: Lump, or the [fox](../../characters/fox/README.md)
   - **Size**: Small, Medium, Large or Huge
   - **Look**:
     - **Floating** (the default): a light outline with a soft dark halo, so he reads on any wallpaper

@@ -21,6 +21,12 @@ let BRIDGE = "http://127.0.0.1:47823"
 let SIZES: [(String, CGFloat)] = [("Small", 120), ("Medium", 170), ("Large", 240), ("Huge", 340)]
 let LOOKS: [(String, String)] = [("float", "Floating"), ("ink", "Floating, Dark Outline"), ("glass", "Glass Screen (Like the Desk Lump)")]
 let GAGS = ["shock", "moto", "wolf", "accordion", "anvil", "disco", "banana", "balloon", "sneeze", "moon", "bomb"]
+let CHARACTERS: [(String, String)] = [("lump", "Lump"), ("fox", "Fox")]
+/// What each character is made of: its page and the scripts that draw it (from the app's web folder).
+let CHARACTER_FILES: [String: (page: String, scripts: [String])] = [
+    "lump": ("lump.html", ["clip_kit.js", "clips.bundle.js"]),
+    "fox": ("fox/fox.html", ["fox/fox.js", "fox/rig.js", "fox/character.js"]),
+]
 let MARGIN: CGFloat = 12
 
 // MARK: - the board's socket
@@ -178,6 +184,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     var ready = false
     var queued: [String] = []
     var clips: [String] = []
+    var gags: [String] = GAGS               // the character's own tap gags, as it reports them
+    var webDir: URL!
     var hoverTimer: Timer?
     var hiddenByUser = false
     var bridgeConnected = false         // the link's state, kept on the main thread
@@ -195,6 +203,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         get { prefs.bool(forKey: "onDesktop") }
         set { prefs.set(newValue, forKey: "onDesktop") }
     }
+    var character: String {             // who's in the window: "lump" or "fox"
+        get { let v = prefs.string(forKey: "character") ?? "lump"; return CHARACTER_FILES[v] == nil ? "lump" : v }
+        set { prefs.set(newValue, forKey: "character") }
+    }
     var snap: Bool {                    // after a drag, slide into the nearest corner
         get { prefs.object(forKey: "snap") == nil ? true : prefs.bool(forKey: "snap") }
         set { prefs.set(newValue, forKey: "snap") }
@@ -204,6 +216,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         guard let webDir = Bundle.main.url(forResource: "web", withExtension: nil) else {
             NSLog("desklump: no web folder in the app bundle (build it with tools/desklump/build.sh)"); NSApp.terminate(nil); return
         }
+        self.webDir = webDir
         makeWindow(webDir)
         link.onLine = { [weak self] line in self?.toLump(line) }
         link.onChange = { [weak self] on in self?.bridgeConnected = on }
@@ -222,17 +235,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     func makeWindow(_ webDir: URL) {
         let config = WKWebViewConfiguration()
-        let uc = config.userContentController
-        uc.add(self, name: "lump")
-        func script(_ name: String, _ when: WKUserScriptInjectionTime) {
-            let url = webDir.appendingPathComponent(name)
-            guard let src = try? String(contentsOf: url, encoding: .utf8) else { NSLog("desklump: missing \(name)"); return }
-            uc.addUserScript(WKUserScript(source: src, injectionTime: when, forMainFrameOnly: true))
-        }
-        script("start.js", .atDocumentStart)
-        script("clip_kit.js", .atDocumentEnd)
-        script("clips.bundle.js", .atDocumentEnd)
-        script("desktop.js", .atDocumentEnd)
+        config.userContentController.add(self, name: "lump")
 
         let frame = NSRect(origin: savedOrigin() ?? cornerOrigin("BR"), size: NSSize(width: side, height: side))
         panel = LumpPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -268,10 +271,27 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             guard let self = self else { return }
             if let list = list { self.web.configuration.userContentController.add(list) }
             else { NSLog("desklump: couldn't install the offline rule: \(String(describing: err))") }
-            self.web.loadFileURL(webDir.appendingPathComponent("lump.html"), allowingReadAccessTo: webDir)
+            self.loadCharacter()
         }
         clampOnScreen()
         panel.orderFrontRegardless()
+    }
+
+    /// (Re)load the page with the chosen character's scripts. He comes up offline and asks the bridge
+    /// to resend everything ("resync") as soon as it next says anything, so switching loses nothing.
+    func loadCharacter() {
+        guard let files = CHARACTER_FILES[character] else { return }
+        let uc = web.configuration.userContentController
+        uc.removeAllUserScripts()
+        func script(_ name: String, _ when: WKUserScriptInjectionTime) {
+            guard let src = try? String(contentsOf: webDir.appendingPathComponent(name), encoding: .utf8) else { NSLog("desklump: missing \(name)"); return }
+            uc.addUserScript(WKUserScript(source: src, injectionTime: when, forMainFrameOnly: true))
+        }
+        script("start.js", .atDocumentStart)
+        files.scripts.forEach { script($0, .atDocumentEnd) }
+        script("desktop.js", .atDocumentEnd)
+        ready = false; queued.removeAll()
+        web.loadFileURL(webDir.appendingPathComponent(files.page), allowingReadAccessTo: webDir)
     }
 
     func applyLayer() {
@@ -356,6 +376,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if body["ready"] as? Bool == true {
             ready = true
             clips = (body["clips"] as? [String]) ?? []
+            gags = (body["gags"] as? [String]) ?? GAGS
             publishClips()
             js("desk.setLook('\(look)')")
             queued.forEach(js); queued.removeAll()
@@ -402,13 +423,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
         var gagItems = [item("A Random Gag", #selector(playNamed(_:)), rep: "tap"), NSMenuItem.separator()]
-        gagItems += GAGS.map { item(pretty($0), #selector(playNamed(_:)), rep: $0) }
+        // Lump's gags go through the bridge by name (so they get their sounds); other characters play theirs as tap_<gag>
+        gagItems += gags.map { item(pretty($0), #selector(playNamed(_:)), rep: character == "lump" ? $0 : "tap_" + $0) }
         m.addItem(sub("Gags", gagItems))
         var clipItems = [item("Surprise Me", #selector(playRandomClip)), NSMenuItem.separator()]
         clipItems += clips.map { item(pretty($0), #selector(playNamed(_:)), rep: $0) }
         m.addItem(sub("Clips (\(clips.count))", clipItems))
         m.addItem(item("Show Off (Every Mood, on a Loop)", #selector(demo)))
         m.addItem(.separator())
+        m.addItem(sub("Character", CHARACTERS.map { item($0.1, #selector(pickCharacter(_:)), on: character == $0.0, rep: $0.0) }))
         m.addItem(sub("Size", SIZES.map { item($0.0, #selector(pickSize(_:)), on: abs(side - $0.1) < 1, rep: $0.1) }))
         m.addItem(sub("Look", LOOKS.map { item($0.1, #selector(pickLook(_:)), on: look == $0.0, rep: $0.0) }))
         let corners = [("Top Left", "TL"), ("Top Right", "TR"), ("Bottom Left", "BL"), ("Bottom Right", "BR")]
@@ -439,6 +462,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         clampOnScreen()
     }
     @objc func pickLook(_ s: NSMenuItem) { if let v = s.representedObject as? String { look = v; js("desk.setLook('\(look)')") } }
+    @objc func pickCharacter(_ s: NSMenuItem) {
+        guard let v = s.representedObject as? String, v != character, CHARACTER_FILES[v] != nil else { return }
+        character = v; loadCharacter()
+    }
     @objc func pickCorner(_ s: NSMenuItem) { if let c = s.representedObject as? String { moveTo(cornerOrigin(c, on: visibleFrame()), animate: true) } }
     @objc func toggleSnap() { snap.toggle(); if snap { moved() } }
     @objc func toggleLayer() { onDesktop.toggle(); applyLayer(); panel.orderFrontRegardless() }
