@@ -253,7 +253,16 @@ final class Asker {
                 self.running = nil
                 if p.terminationReason == .uncaughtSignal { done("That was taking too long, so I gave up. Try again?", false) }
                 else if p.terminationStatus == 0 && !text.isEmpty { done(text, true) }
-                else { done(problem.isEmpty ? "Claude Code didn't answer (it exited with \(p.terminationStatus))." : String(problem.prefix(300)), false) }
+                else {
+                    // In print mode Claude Code reports most problems on stdout ("Invalid API key · Please run /login"),
+                    // so show whichever stream says something, and add the fix for the usual one.
+                    let said = [problem, text].first { !$0.isEmpty } ?? ""
+                    var msg = said.isEmpty ? "Claude Code didn't answer (it exited with \(p.terminationStatus))." : String(said.prefix(300))
+                    if said.lowercased().contains("login") || said.lowercased().contains("api key") || said.lowercased().contains("auth") {
+                        msg += "\n\nTo fix it, open Terminal, run `claude`, and type `/login` to sign in."
+                    }
+                    done(msg, false)
+                }
             }
         }
     }

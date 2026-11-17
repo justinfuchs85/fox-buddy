@@ -106,7 +106,7 @@
     ask() { clearTimeout(ttlTimer); $('card').className = ''; $('input').value = ''; mode('ask'); setTimeout(() => $('input').focus(), 30); },
     thinking(q) { clearTimeout(ttlTimer); $('card').className = ''; $('q').textContent = q; $('answer').innerHTML = ''; $('thinking').hidden = false; $('answerActions').hidden = true; mode('answer'); },
     answer(q, text) { lastAnswer = text; $('copy').hidden = false; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = markdown(text); $('answerActions').hidden = false; mode('answer'); },
-    error(q, text) { lastAnswer = ''; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = '<p>' + esc(text) + '</p>'; $('answerActions').hidden = false; $('copy').hidden = true; mode('answer'); },
+    error(q, text) { lastAnswer = ''; $('q').textContent = q; $('thinking').hidden = true; $('answer').innerHTML = markdown(text); $('answerActions').hidden = false; $('copy').hidden = true; mode('answer'); },
   };
   $('close').onclick = () => post({ action: 'dismiss' });
   $('jump').onclick = () => post({ action: 'jump' });
