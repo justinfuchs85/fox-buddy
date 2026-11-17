@@ -26,12 +26,106 @@
   // Each returns [pose, ticks] pairs; the first pose is the one transitions start and end on.
   const SLEEP = { eyes: 'closed', mouth: 'none', earL: 0.3, earR: 0.3, tail: 0.06, hy: 4, tilt: 0.06, fx: 'idle' };
   const AWAKE = { eyes: 'dot', mouth: 'w', fx: 'none' };
-  const WORK = { eyes: 'look', look: [0, 3.5], mouth: 'flat', perk: 1.04, prop: 'laptop', fx: 'none', hy: 2 };
+  const WORK = { eyes: 'look', look: [0, 3.5], mouth: 'flat', perk: 1.04, prop: 'adder', hat: 'visor', fx: 'none', hy: 2 };
+  // ---------- working: three acts in rotation (accountant, typewriter, mad scientist) ----------
+  // Each act is keyframes [pose, ticks] on top of a seated working pose. In the long haul he's frazzled
+  // and the mess piles up: tape on the floor, a heap of paper balls, singed fur, a stack of coffee cups.
+  const WB = { eyes: 'look', look: [0, 3], mouth: 'flat', perk: 1.04, hy: 2, fx: 'none' };
+  function worker(tired, extra) {
+    return list => list.map(([t, p]) => {
+      const q = Object.assign({}, WB, extra, p);
+      if (tired) {
+        if (q.eyes === 'look' || q.eyes === 'dot') q.eyes = 'squint';
+        if (q.mouth === 'flat' || q.mouth === 'w') q.mouth = 'wobble';
+        Object.assign(q, { earL: Math.max(q.earL || 0, 0.38), earR: Math.max(q.earR || 0, 0.32), squash: (q.squash || 0) + 0.04, cups: 3 });
+        if (!q.fx || q.fx === 'none') q.fx = 'sweat';
+      }
+      return [mix(q), t];
+    });
+  }
+  function accountant(tired) {
+    const W = worker(tired, { prop: 'adder', hat: 'visor', tilthat: tired ? 0.16 : 0, pileTape: tired ? 1 : 0 });
+    const out = []; let tape = 0.15;
+    const punch = n => { for (let k = 0; k < n; k++) { const l = k % 2 === 0; out.push(...W([[4, { tape, armL: [112, l ? 178 : 168], armR: [146, l ? 168 : 178], hy: 2 + (k % 2) }]])); } };
+    const crank = () => {
+      out.push(...W([[6, { tape, armR: [180, 170], armL: [112, 172], crank: 0 }], [4, { tape: tape + 0.2, armR: [176, 190], armL: [112, 172], crank: 1, fx: 'chunk' }],
+                     [6, { tape: tape + 0.2, armR: [178, 180], armL: [112, 172], crank: 0.3 }]]));
+      tape += 0.2;
+    };
+    for (let r = 0; r < 3; r++) {
+      punch(12); crank();
+      out.push(...W([[22, { tape, look: [-1, -3], tilt: -0.05, mouth: 'w' }]]));
+      punch(8); crank();
+    }
+    out.push(...W([[8, { tape, armR: [104, 120], look: [-2, -2] }], [3, { tape: 0.12, armR: [148, 142], strip: true, fx: 'rip' }],
+      [30, { tape: 0.12, strip: true, armR: [150, 144], armL: [106, 146], eyes: 'squint', brows: 'up', look: [0, -1], hy: 0 }],
+      [8, { tape: 0.12, strip: true, armR: [150, 144], armL: [106, 146], mouth: 'smile', hy: 4 }], [8, { tape: 0.12, strip: true, armR: [150, 144], armL: [106, 146], mouth: 'smile', hy: 0 }],
+      [10, { tape: 0.12, mouth: 'w' }]]));
+    return out;
+  }
+  function typewriter(tired) {
+    const W = worker(tired, { prop: 'typewriter', balls: tired ? 5 : 0 });
+    const out = []; let page = 0.15;
+    const line = () => {
+      for (let k = 0; k < 10; k++) out.push(...W([[3, { page, carriage: -0.9 + k * 0.2, armL: [114, k % 2 ? 178 : 170], armR: [142, k % 2 ? 170 : 178] }]]));
+      out.push(...W([[5, { page, carriage: 1.1, fx: 'ding', look: [-2, 0], armL: [114, 174], armR: [142, 174] }], [5, { page, carriage: 1.1, armL: [70, 152], armR: [142, 174] }],
+                     [6, { page: page + 0.15, carriage: -0.9, armL: [96, 152], armR: [142, 174] }]]));
+      page += 0.15;
+    };
+    for (let r = 0; r < 2; r++) {
+      for (let l = 0; l < 4; l++) line();
+      out.push(...W([[20, { page, carriage: -0.9, look: [0, -2], mouth: 'flat' }], [10, { page, carriage: -0.9, look: [0, -2], brows: 'cross', mouth: 'wobble' }],
+        [5, { page, carriage: -0.9, armL: [116, 116], armR: [140, 116] }], [4, { page: 0, carriage: -0.9, armL: [112, 128], armR: [144, 128], fx: 'rip', ball: 1 }],
+        [12, { page: 0, carriage: -0.9, armL: [120, 150], armR: [136, 150], ball: 1, eyes: 'squint', mouth: 'flat' }],
+        [4, { page: 0, carriage: -0.9, armR: [168, 104], ball: 1, toss: 0 }], [12, { page: 0, carriage: -0.9, armR: [180, 90], toss: 1, eyes: 'look', look: [3, -2] }],
+        [14, { page: 0.15, carriage: -0.9, eyes: 'happy', mouth: 'smile' }]]));
+      page = 0.15;
+    }
+    return out;
+  }
+  function scientist(tired) {
+    const W = worker(tired, { prop: 'lab', hat: 'goggles', singed: tired ? 1 : 0 });
+    const out = [];
+    const brew = boom => {
+      const s = tired ? 1 : 0;
+      out.push(...W([[18, { levelL: 0.8, levelR: 0.35, boil: 0.15, singed: s, look: [-2, 3] }], [10, { levelL: 0.8, levelR: 0.35, boil: 0.15, singed: s, look: [2, 3] }],
+        [10, { levelL: 0.8, levelR: 0.35, pour: 0.5, armL: [118, 160], boil: 0.15, singed: s }],
+        [24, { levelL: 0.2, levelR: 0.9, pour: 1, armL: [130, 140], boil: 0.3, singed: s, look: [2, 2], mouth: 'o' }],
+        [10, { levelL: 0.2, levelR: 0.9, pour: 0, boil: 0.4, singed: s }],
+        [24, { levelL: 0.2, levelR: 0.9, boil: 0.7, eyes: 'wide', look: [2, 2], singed: s, mouth: 'flat' }],
+        [16, { levelL: 0.2, levelR: 0.9, boil: 1, eyes: 'wide', look: [2, 2], x: 2, singed: s, mouth: 'wobble' }]]));
+      if (boom) {
+        out.push(...W([[3, { levelL: 0.2, levelR: 0.3, boil: 0, fx: 'poof', poof: 0.35, squash: 0.1 }], [8, { levelL: 0.2, levelR: 0.3, fx: 'poof', poof: 1, singed: 1, eyes: 'closed' }],
+          [16, { levelL: 0.2, levelR: 0.3, singed: 1, eyes: 'dot', look: [0, 0], mouth: 'flat', earL: 0.25, earR: 0.25 }], [4, { levelL: 0.2, levelR: 0.3, singed: 1, eyes: 'closed' }],
+          [16, { levelL: 0.2, levelR: 0.3, singed: 1, eyes: 'dot', look: [0, 0], mouth: 'flat' }],
+          [16, { levelL: 0.2, levelR: 0.3, singed: 1, armR: [146, 106], eyes: 'closed' }], [20, { levelL: 0.2, levelR: 0.3, singed: 1, mouth: 'wobble', blush: true, look: [2, 0] }]]));
+      } else {
+        out.push(...W([[4, { levelL: 0.2, levelR: 0.9, boil: 0.5, eyes: 'happy', mouth: 'open', armL: [86, 96], armR: [170, 96], fx: 'eureka', singed: s }],
+          [26, { levelL: 0.2, levelR: 0.9, boil: 0.4, eyes: 'happy', mouth: 'open', armL: [84, 90], armR: [172, 90], fx: 'eureka', singed: s, y: -4 }],
+          [14, { levelL: 0.2, levelR: 0.9, boil: 0.3, eyes: 'happy', mouth: 'smile', singed: s }]]));
+      }
+    };
+    brew(true); brew(false);
+    return out;
+  }
+  // the acts back to back, with a puff of smoke to swap his gear (and round from the last to the first)
+  const POOF_SWAP = (prev, next) => [[mix(prev, { fx: 'poof', poof: 0.15 }), 3], [mix(prev, { fx: 'poof', poof: 0.45 }), 3], [mix(next, { fx: 'poof', poof: 0.75 }), 3], [mix(next, { fx: 'poof', poof: 1 }), 3]];
+  function shift(tired) {
+    const frames = [];
+    for (const act of [accountant, typewriter, scientist]) {
+      const a = act(tired);
+      if (frames.length) frames.push(...POOF_SWAP(frames[frames.length - 1][0], a[0][0]));
+      frames.push(...a);
+    }
+    frames.push(...POOF_SWAP(frames[frames.length - 1][0], frames[0][0]));
+    return frames;
+  }
+  const HOLD = new Set(['working', 'longhaul']);      // loops made of held beats (not one continuous sway)
   const MOODS = {
     idle: () => Array.from({ length: 8 }, (_, i) => [mix(SLEEP, { squash: 0.02 + wave(i, 8, 0.02), hy: 4 + wave(i, 8, 1.5) }), 6]),
     night: () => Array.from({ length: 8 }, (_, i) => [mix(SLEEP, { wrap: true, squash: 0.12 + wave(i, 8, 0.015), hy: 8 + wave(i, 8, 1), tilt: 0.14, earL: 0.45, earR: 0.4, fx: 'night' }), 8]),
-    working: () => Array.from({ length: 8 }, (_, i) => [mix(WORK, { hy: 2 + (i % 2), tail: wave(i, 8, 0.08), tap: i % 2 ? 'R' : 'L', look: [i % 4 === 3 ? 2 : 0, 3.5] }), 3]),
-    longhaul: () => Array.from({ length: 8 }, (_, i) => [mix(WORK, { eyes: i === 5 ? 'closed' : 'squint', earL: 0.4, earR: 0.35, mouth: 'wobble', squash: 0.04, hy: 4 + (i % 2), tail: 0.05, tap: i % 3 === 0 ? 'L' : null, fx: 'sweat' }), 4]),
+    working: () => shift(false),
+    longhaul: () => shift(true),
     alert: () => Array.from({ length: 6 }, (_, i) => [mix(AWAKE, { eyes: 'wide', mouth: i % 3 === 0 ? 'o' : 'smile', armR: i % 2 ? [176, 84] : [186, 98], armL: null, y: i % 3 === 1 ? -6 : 0, squash: i % 3 === 2 ? 0.05 : 0, perk: 1.08, tail: 0.25, fx: 'alert' }), 3]),
     waiting: () => Array.from({ length: 6 }, (_, i) => [mix(AWAKE, { eyes: 'wide', brows: 'worried', mouth: 'wobble', armR: i % 2 ? [178, 82] : [188, 100], armL: i % 2 ? [80, 100] : [70, 84], y: i % 2 ? -10 : 0, squash: i % 2 ? -0.05 : 0.06, perk: 1.1, tail: 0.35 + wave(i, 6, 0.15), fx: 'waiting' }), 3]),
     done: () => {
@@ -49,7 +143,7 @@
   for (const m of MOMENTS) {
     const frames = MOODS[m]();
     firstPose[m] = frames[0][0];
-    LOOPS[m] = smooth(frames, true).map(([p, t]) => [add(m, p), t]);
+    LOOPS[m] = smooth(frames, !HOLD.has(m)).map(([p, t]) => [add(m, p), t]);
   }
 
   // ---------- in between: blend one pose into another ----------
@@ -77,6 +171,8 @@
       out.tailK = (out.tailK || 1) * (1 - 0.4 * Math.sin(Math.PI * t));
     for (const k of ['leaf', 'bubble'])                  // drifting leaf, growing bubble: smooth too, while both have one
       if (typeof a[k] === 'number' && typeof b[k] === 'number' && a[k] >= 0 && b[k] >= 0) out[k] = a[k] * (1 - t) + b[k] * t;
+    for (const k of ['tape', 'crank', 'page', 'carriage', 'pour', 'boil', 'levelL', 'levelR', 'toss', 'poof', 'tilthat'])   // his work props
+      if (typeof a[k] === 'number' && typeof b[k] === 'number') out[k] = a[k] * (1 - t) + b[k] * t;
     for (const s of ['L', 'R']) {
       const ka = a['arm' + s], kb = b['arm' + s];
       if (!ka && !kb) { out['arm' + s] = null; continue; }
@@ -93,6 +189,9 @@
       if (o.blink !== false && Math.abs(t - 0.5) < 0.5 / n + 0.01 && a.eyes !== b.eyes) p.eyes = 'closed';
       p.squash = (p.squash || 0) + Math.sin(t * Math.PI) * (o.squash ?? 0.06);
       p.fx = t < 0.5 ? a.fx : b.fx;
+      // his gear appears and disappears in a puff of smoke (and a puff covers leaving work mid-act)
+      if (((a.prop || '') !== (b.prop || '') || (a.hat || '') !== (b.hat || '')) && t > 0.25 && t < 0.85) { p.fx = 'poof'; p.poof = (t - 0.25) / 0.6; }
+      if (o.poofStart && t <= 0.3) { p.fx = 'poof'; p.poof = 0.5 + t / 0.3 * 0.5; }
       out.push([p, ticks]);
     }
     return out;
@@ -105,7 +204,8 @@
     const pa = firstPose[a], pb = firstPose[b];
     const mid = mix(AWAKE, { eyes: 'dot', fx: 'none' });           // through a plain awake pose when both ends are busy
     const busy = p => p.prop || p.wrap || p.armL || p.armR;
-    const frames = busy(pa) && busy(pb) ? [...tween(pa, mid, 10), ...tween(mid, pb, 10)] : tween(pa, pb, 16);
+    const ps = { poofStart: HOLD.has(a) };                // he may be leaving mid-act: hide the jump in a puff
+    const frames = busy(pa) && busy(pb) ? [...tween(pa, mid, 10, 1, ps), ...tween(mid, pb, 10)] : tween(pa, pb, 16, 1, ps);
     TRANS[`${a}>${b}`] = seq(`t_${a}_${b}`, frames);
   }
 
@@ -115,7 +215,7 @@
   // An event that starts and ends in mood m: walk from m's pose to standing, play the beats, walk back.
   function event(name, m, beats, o = {}) {
     const from = firstPose[m], start = o.start || STAND;
-    const into = o.noInto ? [] : tween(from, start, 10);
+    const into = o.noInto ? [] : tween(from, start, 10, 1, { poofStart: HOLD.has(m) });
     const out = o.noOut ? [] : tween(beats.length ? beats[beats.length - 1][0] : start, from, 12);
     CLIPS[name] = { home: m, seq: seq(name, [...into, ...smooth([[start, 4], ...beats]), ...out]) };
   }
@@ -132,8 +232,8 @@
   event('hello', 'idle', beat([[6, { eyes: 'squint', mouth: 'open', squash: -0.08, armL: [96, 96], armR: [160, 96] }], [8, { eyes: 'squint', mouth: 'open', squash: -0.1, armL: [92, 86], armR: [164, 86] }],
     [5, { eyes: 'happy', mouth: 'smile', armR: [176, 92] }], [5, { eyes: 'happy', mouth: 'smile', armR: [186, 104] }], [5, { eyes: 'happy', mouth: 'smile', armR: [176, 92] }], [5, { eyes: 'happy', mouth: 'smile', armR: [186, 104] }], [10, { eyes: 'dot', mouth: 'w', tail: 0.2 }]]), { start: STAND });
   // oops (while working): a startled jolt, a paw to the face, a sheepish look, back to it
-  event('oops', 'working', beat([[3, { eyes: 'wide', mouth: 'o', y: -6, perk: 1.15, prop: 'laptop' }], [10, { eyes: 'wide', mouth: 'o', perk: 1.15, prop: 'laptop', fx: 'alert' }],
-    [10, { eyes: 'closed', mouth: 'wobble', armR: [146, 112], prop: 'laptop', earL: 0.4, earR: 0.4 }], [12, { eyes: 'squint', mouth: 'wobble', blush: true, prop: 'laptop', earL: 0.3, earR: 0.3, look: [2, 0] }], [6, { prop: 'laptop' }]]), { start: mix(STAND, { prop: 'laptop' }) });
+  event('oops', 'working', beat([[3, { eyes: 'wide', mouth: 'o', y: -6, perk: 1.15, prop: 'adder', hat: 'visor' }], [10, { eyes: 'wide', mouth: 'o', perk: 1.15, prop: 'adder', hat: 'visor', fx: 'alert' }],
+    [10, { eyes: 'closed', mouth: 'wobble', armR: [146, 112], prop: 'adder', hat: 'visor', earL: 0.4, earR: 0.4 }], [12, { eyes: 'squint', mouth: 'wobble', blush: true, prop: 'adder', hat: 'visor', earL: 0.3, earR: 0.3, look: [2, 0] }], [6, { prop: 'adder', hat: 'visor' }]]), { start: mix(STAND, { prop: 'adder', hat: 'visor' }) });
 
   // ---------- tap gags: each a few beats, played from any daytime mood ----------
   const GAG = {
@@ -183,6 +283,61 @@
 
   // ---------- props and marks ----------
   const PROPS = {
+    adder(c, P, a, seed) {
+      const x = 128 + (P.x || 0), y = 201;
+      // the paper tape: up out of the machine, over the top, and down again as it grows
+      const L = (P.tape || 0) * 80, x0 = x - 8, y0 = y - 27, tp = [[x0, y0]];
+      for (let s = 3; s <= L; s += 3) {
+        if (s <= 34) tp.push([x0, y0 - s]);
+        else if (s <= 78) { const th = (s - 34) / 44 * Math.PI; tp.push([x0 - 14 + Math.cos(th) * 14, y0 - 34 - Math.sin(th) * 14]); }
+        else tp.push([x0 - 28, Math.min(y0 - 34 + (s - 78), 196)]);
+      }
+      if (tp.length > 1) { trace(c, tp, false); c.lineCap = 'butt'; c.strokeStyle = INK; c.lineWidth = 11; c.stroke(); c.strokeStyle = CREAM; c.lineWidth = 7; c.stroke(); c.lineCap = 'round'; }
+      if (P.pileTape) for (let k = 0; k < 4; k++) { c.beginPath(); c.ellipse(62 + k * 9, 194 - (k % 2) * 3, 13, 5, 0.25 * k, 0, Math.PI * 2); c.strokeStyle = INK; c.lineWidth = 7; c.stroke(); c.strokeStyle = CREAM; c.lineWidth = 4; c.stroke(); }
+      part(c, [[x - 34, y], [x + 34, y], [x + 30, y - 28], [x - 30, y - 28]], '#8A8F9C', seed + 800, { width: 3.4 });
+      for (let r = 0; r < 2; r++) for (let k = 0; k < 4; k++) dot(c, x - 16 + k * 10, y - 19 + r * 9, 2.6, CREAM);
+      const cr = P.crank || 0, hx = x + 42, hy = y - 24 + cr * 20;                 // the crank on the side
+      stroke(c, [[x + 30, y - 14], [hx, hy]], seed + 801, 3.4, ink()); dot(c, hx, hy, 4.5, '#E8454B');
+      if (P.strip) {                                                              // the torn-off strip, held up to read
+        const s0 = P.armR ? [(P.armR[0] + (P.armL ? P.armL[0] : P.armR[0] - 40)) / 2, P.armR[1] - 6] : [128, 112];
+        part(c, [[s0[0] - 24, s0[1] - 6], [s0[0] + 24, s0[1] - 6], [s0[0] + 24, s0[1] + 6], [s0[0] - 24, s0[1] + 6]], CREAM, seed + 802, { width: 2.4, lineColour: INK });
+        for (let k = 0; k < 4; k++) stroke(c, [[s0[0] - 18 + k * 10, s0[1]], [s0[0] - 12 + k * 10, s0[1]]], seed + 803 + k, 1.6, '#888');
+      }
+    },
+    typewriter(c, P, a, seed) {
+      const x = 128 + (P.x || 0), y = 201, sh = -(P.carriage || 0) * 14;
+      const ph = 12 + (P.page || 0) * 52, top = y - 34 - ph;                       // the page rises out of the roller
+      part(c, [[x + sh - 24, y - 34], [x + sh + 24, y - 34], [x + sh + 24, top], [x + sh - 24, top]], CREAM, seed + 820, { width: 2.6, lineColour: INK, wobble: 0.5 });
+      for (let k = 0; k < Math.floor((P.page || 0) * 7); k++) { const ly = top + 8 + k * 7; if (ly < y - 38) stroke(c, [[x + sh - 18, ly], [x + sh + 14 - (k % 3) * 6, ly]], seed + 821 + k, 1.6, '#8A8A8A'); }
+      part(c, [[x + sh - 40, y - 40], [x + sh + 40, y - 40], [x + sh + 40, y - 31], [x + sh - 40, y - 31]], '#2B2F38', seed + 830, { width: 3 });
+      stroke(c, [[x + sh - 40, y - 36], [x + sh - 52, y - 48]], seed + 831, 3.2, ink()); dot(c, x + sh - 53, y - 49, 4.2, '#E8454B');
+      part(c, [[x - 42, y], [x + 42, y], [x + 36, y - 30], [x - 36, y - 30]], '#3E4452', seed + 832, { width: 3.4 });
+      for (let r = 0; r < 3; r++) for (let k = 0; k < 6 - r; k++) dot(c, x - 25 + r * 5 + k * 10, y - 22 + r * 7, 2.6, CREAM);
+      if (P.ball && !(P.toss > 0)) crumple(c, x, 146, seed);
+      if (P.toss > 0 && P.toss < 1) { const t = P.toss; crumple(c, 172 + t * 72, 96 - t * 112 + t * t * 30, seed); }
+      for (let k = 0; k < (P.balls || 0); k++) crumple(c, 56 + (k % 3) * 14, 193 - Math.floor(k / 3) * 13, seed + k);
+    },
+    lab(c, P, a, seed, tick) {
+      const flask = (fx, fy, rot, level, colour, k) => {
+        const shape = [[-5, -34, 1], [5, -34, 1], [5, -22, 1], [16, -3], [13, 2, 1], [-13, 2, 1], [-16, -3], [-5, -22, 1]];
+        c.save(); c.translate(fx, fy); c.rotate(rot);
+        trace(c, shape, true); c.fillStyle = 'rgba(200,230,255,.22)'; c.fill();
+        c.save(); trace(c, shape, true); c.clip(); c.fillStyle = colour; c.fillRect(-20, 2 - level * 30, 40, level * 30 + 4); c.restore();
+        part(c, shape, null, seed + 840 + k, { width: 3, wobble: 0.4 });
+        c.restore();
+      };
+      const p = P.pour || 0, boil = P.boil || 0, shake = boil > 0.9 ? (tick % 2 ? 1.5 : -1.5) : 0;
+      const rx = 162 + (P.x || 0) + shake, ry = 199, mix2 = (P.levelR || 0) > 0.6;
+      const colourR = mix2 ? '#6EE7B7' : '#B983FF';
+      flask(rx, ry, 0, P.levelR ?? 0.35, colourR, 0);
+      for (let k = 0; k < Math.round(1 + boil * 6); k++) {                        // bubbles out of the top
+        const yy = ry - 36 - ((tick * (1 + boil * 2) + k * 11) % 34), r = 2 + (k % 3) * (0.5 + boil);
+        c.beginPath(); c.arc(rx + Math.sin(k * 2.3 + tick * 0.25) * 5, yy, r, 0, Math.PI * 2); c.fillStyle = mix2 ? 'rgba(110,231,183,.75)' : 'rgba(185,131,255,.75)'; c.fill();
+      }
+      const lx = 96 + (P.x || 0) + (rx - 30 - 96) * p, ly = 199 - 40 * p;          // the other flask, lifted and tipped to pour
+      flask(lx, ly, 1.75 * p, P.levelL ?? 0.8, '#7CFC9A', 1);
+      if (p > 0.8) { const mx = lx + Math.cos(1.75 * p - Math.PI / 2) * 34, my = ly + Math.sin(1.75 * p - Math.PI / 2) * 34; stroke(c, [[mx, my], [rx - 2, ry - 36]], seed + 850, 3.2, '#7CFC9A'); }
+    },
     laptop(c, P, a, seed, tick) {
       const x = 128 + (P.x || 0), y = 201;
       part(c, [[x - 34, y - 32], [x + 34, y - 32], [x + 38, y - 2], [x - 38, y - 2]], '#4B4F5C', seed + 600, { width: 3.6 });
@@ -254,12 +409,63 @@
     if (fx === 'puff') for (let k = 0; k < 3; k++) { c.beginPath(); c.arc(x + 4 + k * 10, 128 - k * 4, 4 + k * 2, 0, Math.PI * 2); c.strokeStyle = ink(); c.lineWidth = 2; c.stroke(); }
     if (fx === 'boop') { const p = [x + 2, 112]; for (let k = 0; k < 2; k++) { c.beginPath(); c.arc(p[0], p[1], 10 + k * 8, -2.6, -0.5); c.strokeStyle = ink(); c.lineWidth = 2.4; c.stroke(); } }
     if (fx === 'boo') text(c, 'boo!', x + 58, 66, 18, 0.15, '#FFC94A');
+    if (fx === 'chunk') text(c, 'ka-chunk!', x - 58, 150, 13, -0.15);
+    if (fx === 'ding') text(c, 'ding!', x - 66, 136, 15, -0.2, '#FFD23F');
+    if (fx === 'rip') text(c, 'rrip', x + 52, 108, 14, 0.2);
+    if (fx === 'eureka') { drawFX(c, 'done', P, tick, seed); text(c, 'eureka!', x, 40, 18, -0.08, '#6EE7B7'); }
+    if (fx === 'poof') {                                   // a cloud of smoke: swells, then thins away
+      const p = Math.max(0, Math.min(1, P.poof ?? 0.5)), al = Math.sin(Math.PI * p), R = 30 + 34 * p;
+      c.save(); c.globalAlpha = al; c.fillStyle = '#E9E4DA';
+      for (let k = 0; k < 8; k++) { const an = k / 8 * Math.PI * 2 + 0.4; c.beginPath(); c.arc(x + Math.cos(an) * R, 140 + Math.sin(an) * R * 0.7, 20 + 12 * p, 0, Math.PI * 2); c.fill(); }
+      c.beginPath(); c.arc(x, 140, R * 0.9, 0, Math.PI * 2); c.fill();
+      c.globalAlpha = al * 0.9; text(c, 'poof', x, 140, 20, -0.1, '#8A8378'); c.restore();
+    }
     if (fx === 'swag') for (let k = 0; k < 3; k++) { const a = -0.6 + k * 0.6, r = 96 + (Math.floor(tick / 3) + k) % 2 * 6; text(c, '✦', x + Math.cos(a) * r, 104 + Math.sin(a) * r * 0.6, 11 + (k % 2) * 4, 0, '#FFD23F'); }
     if (fx === 'notes') for (let k = 0; k < 2; k++) { const ph = (t * 0.8 + k * 0.5) % 1; c.save(); c.globalAlpha = 1 - ph; text(c, k ? '♫' : '♪', x - 56 + k * 116, 96 - ph * 40, 18, 0); c.restore(); }
     if (fx === 'wub') { const s = 1 + (tick % 3) * 0.15; text(c, 'WUB', x + (tick % 2 ? -50 : 50), 50 + (tick % 2) * 6, 22 * s, tick % 2 ? -0.2 : 0.2, '#5AB8FF'); }
   }
+  // crumpled paper: a lumpy ball with a couple of creases
+  function crumple(c, x, y, seed) {
+    const pts = []; for (let k = 0; k < 9; k++) { const an = k / 9 * Math.PI * 2, r = 8 + F.rnd(seed, k) * 3; pts.push([x + Math.cos(an) * r, y + Math.sin(an) * r, k % 2]); }
+    part(c, pts, CREAM, seed + 890, { width: 2.4, lineColour: INK, wobble: 0.3 });
+    stroke(c, [[x - 4, y - 3], [x + 1, y + 1], [x + 4, y - 2]], seed + 891, 1.4, '#8A8A8A');
+  }
+  // things he wears on his head, drawn in his head's own position and tilt
+  const HATS = {
+    visor(c, P, a, seed) {
+      const H = q => a.H(a.T(q));
+      c.save();
+      if (P.tilthat) { const p0 = H([128, 94]); c.translate(p0[0], p0[1]); c.rotate(P.tilthat); c.translate(-p0[0], -p0[1]); }
+      part(c, [[84, 96], [104, 86], [128, 83], [152, 86], [172, 96], [168, 106], [128, 101], [88, 106]].map(H), 'rgba(46,170,90,.88)', seed + 860, { width: 3 });
+      c.restore();
+    },
+    goggles(c, P, a, seed) {
+      const H = q => a.H(a.T(q));
+      stroke(c, [H([80, 106]), a.eL.map((v, i) => v + (i ? 0 : -11))], seed + 870, 4, '#5B4636');
+      stroke(c, [a.eR.map((v, i) => v + (i ? 0 : 11)), H([176, 106])], seed + 871, 4, '#5B4636');
+      for (const e of [a.eL, a.eR]) { c.beginPath(); c.arc(e[0], e[1], 11, 0, Math.PI * 2); c.fillStyle = 'rgba(170,220,255,.35)'; c.fill(); c.lineWidth = 4; c.strokeStyle = '#C9A15B'; c.stroke(); }
+      stroke(c, [[a.eL[0] + 11, a.eL[1]], [a.eR[0] - 11, a.eR[1]]], seed + 872, 3, '#C9A15B');
+    },
+  };
+  function messAndScorch(c, P, a, seed, tick) {
+    if (P.cups) for (let k = 0; k < P.cups; k++) {                                // the long haul's coffee cups
+      const cx = 30, cy = 200 - k * 12;
+      part(c, [[cx - 8, cy], [cx + 8, cy], [cx + 10, cy - 13], [cx - 10, cy - 13]], CREAM, seed + 880 + k, { width: 2.4, lineColour: INK, wobble: 0.4 });
+      c.fillStyle = '#8B5A3C'; c.fillRect(cx - 8, cy - 9, 16, 4);
+    }
+    if (P.singed) {                                                               // soot smudges, and smoke off his ear tips
+      const H = q => a.H(a.T(q));
+      for (const [sx, sy, r] of [[100, 128, 6], [158, 124, 5], [130, 80, 7]]) { const p = H([sx, sy]); c.beginPath(); c.ellipse(p[0], p[1], r, r * 0.7, 0.4, 0, Math.PI * 2); c.fillStyle = 'rgba(40,30,30,.45)'; c.fill(); }
+      for (const ex of [82, 174]) {
+        const p = H([ex, 32]);
+        for (let k = 0; k < 3; k++) { const ph = ((tick / 24) * 0.7 + k / 3) % 1; c.save(); c.globalAlpha = (1 - ph) * 0.7; c.beginPath(); c.arc(p[0] + Math.sin(ph * 6 + k) * 4, p[1] - ph * 26, 3 + ph * 4, 0, Math.PI * 2); c.fillStyle = '#9A9A9A'; c.fill(); c.restore(); }
+      }
+    }
+  }
   function drawExtras(c, P, a, seed, tick) {
+    messAndScorch(c, P, a, seed, tick);
     if (P.prop && PROPS[P.prop] && P.prop !== 'moon') PROPS[P.prop](c, P, a, seed, tick);
+    if (P.hat && HATS[P.hat]) HATS[P.hat](c, P, a, seed);
     if (P.bubble) {                                     // snore bubble from his nose
       const n = a.nose;
       if (P.bubble > 0) { c.beginPath(); c.arc(n[0] + 8 + P.bubble * 0.4, n[1] + 6, P.bubble, 0, Math.PI * 2); c.fillStyle = 'rgba(160,210,255,.35)'; c.fill(); c.strokeStyle = ink(); c.lineWidth = 2; c.stroke(); }

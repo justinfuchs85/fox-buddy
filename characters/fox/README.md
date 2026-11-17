@@ -18,8 +18,12 @@ He has the same 10 moods as Lump, so the bridge drives him unchanged:
 
 - **asleep**: dozing upright
 - **night**: curled up under his own tail
-- **working**: typing on a laptop
-- **long haul**: tired and sweating
+- **working**: rotates through three acts, about 20 seconds each, swapping gear in a puff of smoke:
+  - **accountant**: green visor, an adding machine with paper tape that spools longer and longer
+  - **typewriter**: a typewriter that dings; he rips out the page, crumples it and tosses it
+  - **mad scientist**: goggles and two bubbling flasks; one brew explodes, one is a eureka
+- **long haul**: the same three acts, frazzled, with the mess piling up (tape on the floor, a heap
+  of paper balls, singed fur) and a growing stack of coffee cups
 - **needs you**: waving
 - **waiting too long**: both paws, worried
 - **done**: jumping for joy
