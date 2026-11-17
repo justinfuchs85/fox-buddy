@@ -238,7 +238,8 @@ final class Asker {
                 DispatchQueue.main.async { if self.running === p { self.running = nil; done("Couldn't start Claude Code: \(error.localizedDescription)", false) } }
                 return
             }
-            let giveUp = DispatchWorkItem { if p.isRunning { p.terminate() } }
+            var timedOut = false
+            let giveUp = DispatchWorkItem { if p.isRunning { timedOut = true; p.terminate() } }
             DispatchQueue.global().asyncAfter(deadline: .now() + 120, execute: giveUp)
             var errData = Data()
             let errDone = DispatchSemaphore(value: 0)
@@ -251,7 +252,9 @@ final class Asker {
             DispatchQueue.main.async {
                 guard self.running === p else { return }          // cancelled, or a newer question took over
                 self.running = nil
-                if p.terminationReason == .uncaughtSignal { done("That was taking too long, so I gave up. Try again?", false) }
+                // (Claude Code's launcher can turn the stop signal into exit code 143, so go by why we stopped it)
+                if timedOut { done("Claude Code hadn't answered after 2 minutes, so I stopped it. It may be stuck: try the same question in Terminal with `claude -p \"…\"` to see what it's waiting for.", false) }
+                else if p.terminationReason == .uncaughtSignal || p.terminationStatus == 143 { done("Claude Code was stopped before it answered.", false) }
                 else if p.terminationStatus == 0 && !text.isEmpty { done(text, true) }
                 else {
                     // In print mode Claude Code reports most problems on stdout ("Invalid API key · Please run /login"),
