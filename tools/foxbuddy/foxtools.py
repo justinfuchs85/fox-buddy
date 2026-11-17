@@ -14,7 +14,7 @@ each of his chats. It can't change anything.
 Run by the app (tools/foxbuddy/main.swift) as:
   python3 foxtools.py --folder ~/Desktop --folder ~/Documents --activity-dir "~/Library/Mobile Documents/..."
 """
-import fnmatch, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.request
+import fnmatch, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime
 
 MAX_SCAN = 300_000          # entries looked at per search, at most
@@ -205,13 +205,28 @@ def finances(args, base):
     token = fuchs_bucks_token()
     if not token:
         return "Fuchs Bucks isn't connected on this Mac (no access token in the Keychain). Run tools/foxbuddy/connect_fuchs_bucks.sh."
-    req = urllib.request.Request(base + "/api/fox", method="POST",
-                                 data=json.dumps({"tool": lookup, "input": filters}).encode(),
-                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    data = json.dumps({"tool": lookup, "input": filters}).encode()
+    url = base + "/api/fox"
     try:
-        with urllib.request.urlopen(req, timeout=25) as r:
-            body = r.read(MAX_FINANCE_BYTES * 4).decode("utf-8", "replace")
+        for _ in range(3):
+            req = urllib.request.Request(url, method="POST", data=data,
+                                         headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+            try:
+                with NO_REDIRECTS.open(req, timeout=25) as r:
+                    body = r.read(MAX_FINANCE_BYTES * 4).decode("utf-8", "replace")
+                break
+            except urllib.error.HTTPError as e:
+                # fuchsbucks.com -> www.fuchsbucks.com and the like: follow it, but only to the same site over https,
+                # so the token is never sent anywhere else
+                nxt = same_site_redirect(url, e) if e.code in (301, 302, 303, 307, 308) else None
+                if not nxt:
+                    raise
+                url = nxt
+        else:
+            return "Fuchs Bucks kept redirecting. Check fuchs_bucks_url in ~/.desk-buddy/config.json."
     except urllib.error.HTTPError as e:
+        if e.code in (301, 302, 303, 307, 308):
+            return f"Fuchs Bucks redirected the lookup somewhere else ({e.headers.get('Location')}), so I didn't follow it. Set fuchs_bucks_url in ~/.desk-buddy/config.json to that site's address."
         if e.code in (401, 404):
             return f"Fuchs Bucks refused the lookup ({e.code}): the access token or its settings on the server don't match. Run tools/foxbuddy/connect_fuchs_bucks.sh again."
         return f"Fuchs Bucks had a problem ({e.code})."
@@ -227,6 +242,25 @@ def finances(args, base):
     if len(text) > MAX_FINANCE_BYTES:
         text = text[:MAX_FINANCE_BYTES] + " …(cut short: narrow the dates or filters)"
     return text
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None                                          # surface every redirect as an HTTPError; finances() decides
+
+
+NO_REDIRECTS = urllib.request.build_opener(_NoRedirect)
+
+
+def same_site_redirect(url, err):
+    """The redirect's target, if it's https on the same site (example.com <-> www.example.com), else None."""
+    loc = err.headers.get("Location") or ""
+    target = urllib.parse.urlsplit(urllib.parse.urljoin(url, loc))
+    here = urllib.parse.urlsplit(url)
+    bare = lambda h: (h or "").lower().removeprefix("www.") if hasattr(str, "removeprefix") else re.sub(r"^www\.", "", (h or "").lower())
+    if target.scheme == "https" and bare(target.hostname) == bare(here.hostname) and target.port == here.port:
+        return urllib.parse.urlunsplit((target.scheme, target.netloc, target.path or "/api/fox", target.query, ""))
+    return None
 
 
 FINANCES_TOOL = {
