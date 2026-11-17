@@ -73,7 +73,7 @@
     }
     if (pendingEvent && pendingEvent.from === m) {
       const e = pendingEvent; pendingEvent = null;
-      if (e.key.startsWith('tap_')) say('gag ' + e.key);
+      if (e.key.startsWith('tap_') && !L.silent) say('gag ' + e.key);     // (the bridge plays the gag's sound in time with it)
       else if (tapClips.has(e.key)) say('tapclip ' + e.key);
       return startSeq(e);
     }

@@ -29,12 +29,13 @@ He has the same 10 moods as Lump, so the bridge drives him unchanged:
 
 Moods are linked by 90 direct transitions (every mood to every other).
 
-His events are the three fidgets, hello and oops, and 11 tap gags that each play from any daytime
-mood: pounce, tail chase, sneeze, howl, zoomies, hiccup, leaf, boop, yawn, peekaboo and disco. At
+His events are the three fidgets, hello and oops, and 14 tap gags that each play from any daytime
+mood: pounce, tail chase, sneeze, howl, zoomies, hiccup, leaf, boop, yawn, peekaboo, disco, floss, dab
+and dubstep. At
 night he only gives a grumpy one-eyed startle, and before meetings he checks his clock.
 
-He has no sounds yet. Lump's gag sounds are part of Lump's art, so the bridge simply finds nothing
-to play for the fox's gags.
+He's silent: his gags never ask the bridge for a sound (it only has Lump's). The bridge's mood chimes
+are a bridge setting: `curl -X POST 127.0.0.1:47823/sound -d off` turns them off.
 
 ## Adding to him
 
