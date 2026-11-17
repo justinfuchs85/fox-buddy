@@ -14,7 +14,9 @@ trap 'rm -rf "$BUILD"' EXIT
 # Lump himself: the design page, the clip kit, every clip (each in its own try, so one broken clip
 # can't take the rest down), and the desktop player.
 WEB="$BUILD/web"; mkdir -p "$WEB"
-cp "$ROOT/design/lump.html" "$ROOT/design/clip_kit.js" "$HERE/web/start.js" "$HERE/web/desktop.js" "$WEB/"
+# (lump.html without its Google Fonts links: the app makes no internet requests at all)
+grep -v -E "fonts\.(googleapis|gstatic)\.com" "$ROOT/design/lump.html" > "$WEB/lump.html"
+cp "$ROOT/design/clip_kit.js" "$HERE/web/start.js" "$HERE/web/desktop.js" "$WEB/"
 for f in "$ROOT"/design/clips/*.js(N); do
   print -r -- "try {"
   cat "$f"
@@ -58,6 +60,7 @@ codesign --force --deep --sign - "$APP"
 python3 - <<'PY'
 import json, os
 d = os.path.expanduser("~/.desk-buddy"); p = os.path.join(d, "config.json"); os.makedirs(d, exist_ok=True)
+os.chmod(d, 0o700)
 try: cfg = json.load(open(p))
 except Exception: cfg = {}
 if not cfg.get("desktop_lump"):

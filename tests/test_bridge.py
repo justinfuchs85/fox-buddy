@@ -796,3 +796,33 @@ class BrowserWatchTest(BridgeTest):
     def test_browser_sessions_are_not_saved(self):
         self.report({"Plan - Claude": {"buttons": ["Stop response"]}})
         self.assertNotIn("web:Plan", self.b.state_locked()["sessions"])
+
+
+class RequestGuardTest(unittest.TestCase):
+    """Only this Mac's own tools may talk to the bridge: not web pages, not DNS-rebinding tricks."""
+
+    def allowed(self, path, host="127.0.0.1:47823", origin=None):
+        req = mock.Mock(path=path, headers={"Host": host, **({"Origin": origin} if origin else {})})
+        return bridge.Handler._allowed(req)
+
+    def test_local_tools_without_origin_are_allowed(self):
+        self.assertTrue(self.allowed("/hook"))
+        self.assertTrue(self.allowed("/status", host="localhost:47823"))
+
+    def test_web_pages_are_refused(self):
+        for path in ("/hook", "/cmd", "/sound", "/play", "/browser", "/status"):
+            self.assertFalse(self.allowed(path, origin="https://evil.example"), path)
+        self.assertFalse(self.allowed("/hook", origin="null"))
+
+    def test_rebinding_hosts_are_refused(self):
+        self.assertFalse(self.allowed("/status", host="rebind.evil.example:47823"))
+        self.assertFalse(self.allowed("/status", host=""))
+
+    def test_the_extension_only_reaches_browser(self):
+        self.assertTrue(self.allowed("/browser", origin="chrome-extension://abc"))
+        self.assertFalse(self.allowed("/hook", origin="chrome-extension://abc"))
+
+    def test_sound_names_are_never_paths(self):
+        s = bridge.Sounds.__new__(bridge.Sounds)
+        self.assertFalse(bridge.Sounds.play(s, "../../etc/x", force=True))
+        self.assertFalse(bridge.Sounds.play_gag(s, "tap_../../x", force=True))

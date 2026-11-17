@@ -8,8 +8,9 @@ does for the Claude desktop app, but for claude.ai in the browser.
 
 On each claude.ai tab, the extension reads a few short labels: buttons like "Stop response",
 "Allow once" and "Deny", live status text like "Claude is responding", and short status phrases.
-It sends those, and the chat's title, to the bridge on this Mac (`127.0.0.1:47823/browser`). It
-never sends message text, and nothing leaves your computer. The bridge's existing rules decide
+It sends those to the bridge on this Mac (`127.0.0.1:47823/browser`), naming each chat by the
+first 8 characters of the ID in its address ("chat 1a2b3c4d"), never by its title. It never sends
+message text, and nothing leaves your computer. The bridge's existing rules decide
 what the labels mean (`AppPages` in `tools/buddy_bridge.py`), so if claude.ai changes its
 wording, the fix goes in the bridge, not here.
 
@@ -22,7 +23,7 @@ wording, the fix goes in the bridge, not here.
 4. Reload any claude.ai tabs you already have open.
 
 To check it's working, run `curl -s 127.0.0.1:47823/status`. While a claude.ai tab is open, it
-shows a recent `browser_watcher` report and `web:<chat title>` sessions.
+shows a recent `browser_watcher` report and `web:chat <id>` sessions.
 
 ## Notes
 

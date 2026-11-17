@@ -26,6 +26,11 @@ let MARGIN: CGFloat = 12
 // MARK: - the board's socket
 
 /// Listens where the bridge looks for a Lump on the network, for one bridge at a time, on this Mac only.
+///
+/// A newcomer has to open with the board's pairing line ("k ...", which the bridge always sends first)
+/// within a few seconds before it's listened to or allowed to replace the current bridge. Anything else
+/// is hung up on, which matters because a web page can make the browser send an HTTP request to
+/// 127.0.0.1:4210: its first line is "POST / HTTP/1.1", so it never gets as far as Lump.
 final class BoardLink {
     var onLine: ((String) -> Void)?
     var onChange: ((Bool) -> Void)?
@@ -54,33 +59,63 @@ final class BoardLink {
     }
 
     private func accept(_ c: NWConnection) {
+        c.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + 3) { [weak self, weak c] in      // no pairing line in time: hang up
+            guard let self = self, let c = c, c !== self.conn else { return }
+            c.cancel()
+        }
+        awaitPairing(c, Data())
+    }
+
+    /// Read the newcomer's first line. Only "k" or "k <token>" makes it the bridge.
+    private func awaitPairing(_ c: NWConnection, _ got: Data) {
+        c.receive(minimumIncompleteLength: 1, maximumLength: 256) { [weak self] data, _, done, err in
+            guard let self = self else { return }
+            var buf = got
+            if let d = data { buf.append(d) }
+            if let nl = buf.firstIndex(of: 0x0A) {
+                let first = String(data: buf[buf.startIndex..<nl], encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard first == "k" || first.hasPrefix("k ") else { c.cancel(); return }
+                self.promote(c, rest: Data(buf[buf.index(after: nl)...]), pairing: first)
+                return
+            }
+            if done || err != nil || buf.count > 200 { c.cancel(); return }
+            self.awaitPairing(c, buf)
+        }
+    }
+
+    private func promote(_ c: NWConnection, rest: Data, pairing: String) {
         conn?.cancel()                              // a newer bridge (it restarted): that one wins
         conn = c; buffer = Data()
         c.stateUpdateHandler = { [weak self, weak c] st in
             guard let self = self, let c = c, c === self.conn else { return }
-            switch st {
-            case .ready: self.connected = true
-            case .failed, .cancelled: self.conn = nil; self.connected = false
-            default: break
+            if case .failed = st { self.conn = nil; self.connected = false }
+            if case .cancelled = st { self.conn = nil; self.connected = false }
+        }
+        connected = true
+        DispatchQueue.main.async { self.onLine?(pairing) }
+        if !rest.isEmpty { buffer = rest; drain() }
+        receive(c)
+    }
+
+    private func drain() {
+        while let nl = buffer.firstIndex(of: 0x0A) {
+            let lineData = buffer[buffer.startIndex..<nl]
+            buffer = Data(buffer[buffer.index(after: nl)...])
+            if let s = String(data: lineData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+                DispatchQueue.main.async { self.onLine?(s) }
             }
         }
-        c.start(queue: queue)
-        receive(c)
+        if buffer.count > 4096 { buffer = Data() }     // nothing the bridge says is that long
     }
 
     private func receive(_ c: NWConnection) {
         c.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, done, err in
             guard let self = self else { return }
+            guard c === self.conn else { c.cancel(); return }      // replaced by a newer bridge meanwhile
             if let d = data, !d.isEmpty {
                 self.buffer.append(d)
-                while let nl = self.buffer.firstIndex(of: 0x0A) {
-                    let lineData = self.buffer[self.buffer.startIndex..<nl]
-                    self.buffer = Data(self.buffer[self.buffer.index(after: nl)...])
-                    if let s = String(data: lineData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
-                        DispatchQueue.main.async { self.onLine?(s) }
-                    }
-                }
-                if self.buffer.count > 4096 { self.buffer = Data() }     // nothing the bridge says is that long
+                self.drain()
             }
             if done || err != nil {
                 c.cancel()
@@ -92,6 +127,7 @@ final class BoardLink {
     }
 
     func send(_ line: String) {
+        let line = line.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")   // always exactly one line
         queue.async { self.conn?.send(content: (line + "\n").data(using: .utf8), completion: .contentProcessed { _ in }) }
     }
 }
@@ -134,7 +170,7 @@ final class LumpPanel: NSPanel {
 
 // MARK: - app
 
-final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessageHandler {
+final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     let link = BoardLink()
     var panel: LumpPanel!
     var web: WKWebView!
@@ -144,14 +180,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     var clips: [String] = []
     var hoverTimer: Timer?
     var hiddenByUser = false
+    var bridgeConnected = false         // the link's state, kept on the main thread
     let prefs = UserDefaults.standard
 
     var side: CGFloat {
         get { let v = prefs.double(forKey: "side"); return v > 0 ? CGFloat(v) : 170 }
         set { prefs.set(Double(newValue), forKey: "side") }
     }
-    var look: String {
-        get { prefs.string(forKey: "look") ?? "float" }
+    var look: String {                  // only ever one of LOOKS: it's put into a line of JavaScript
+        get { let v = prefs.string(forKey: "look") ?? "float"; return LOOKS.contains { $0.0 == v } ? v : "float" }
         set { prefs.set(newValue, forKey: "look") }
     }
     var onDesktop: Bool {               // behind other windows, on the desktop itself, rather than floating above them
@@ -169,6 +206,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         makeWindow(webDir)
         link.onLine = { [weak self] line in self?.toLump(line) }
+        link.onChange = { [weak self] on in self?.bridgeConnected = on }
         link.start()
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         // Let clicks through wherever he isn't: check what's under the pointer while it's over the window.
@@ -222,7 +260,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         content.addSubview(grab)
         panel.contentView = content
 
-        web.loadFileURL(webDir.appendingPathComponent("lump.html"), allowingReadAccessTo: webDir)
+        web.navigationDelegate = self
+        // Lump is drawn entirely from files inside the app: block every web request (lump.html links to
+        // Google Fonts, which build.sh also strips), so the app never contacts anything on the internet.
+        let rules = #"[{"trigger":{"url-filter":"^(https?|wss?|ftp)://"},"action":{"type":"block"}}]"#
+        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "desklump-offline", encodedContentRuleList: rules) { [weak self] list, err in
+            guard let self = self else { return }
+            if let list = list { self.web.configuration.userContentController.add(list) }
+            else { NSLog("desklump: couldn't install the offline rule: \(String(describing: err))") }
+            self.web.loadFileURL(webDir.appendingPathComponent("lump.html"), allowingReadAccessTo: webDir)
+        }
         clampOnScreen()
         panel.orderFrontRegardless()
     }
@@ -288,6 +335,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
     }
 
+    /// The page never goes anywhere: anything but the bundled files is refused.
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        decisionHandler(action.request.url?.isFileURL == true ? .allow : .cancel)
+    }
+
     // MARK: talking to Lump
 
     func js(_ code: String) { web.evaluateJavaScript(code, completionHandler: nil) }
@@ -313,7 +365,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// Tell the bridge which clips live in here (it plays them by name, as it would send them to the board).
     func publishClips() {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         if let data = try? JSONSerialization.data(withJSONObject: ["clips": clips], options: [.prettyPrinted]) {
             try? data.write(to: dir.appendingPathComponent("desktop_clips.json"), options: .atomic)
         }
@@ -322,7 +374,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// Ask the bridge to play something (so it gets its sound, and counts as his thing for the minute);
     /// if the bridge isn't there, he plays it himself.
     func play(_ name: String) {
-        guard link.connected, let url = URL(string: BRIDGE + "/play") else { toLump("e " + name); return }
+        guard bridgeConnected, let url = URL(string: BRIDGE + "/play") else { toLump("e " + name); return }
         var req = URLRequest(url: url); req.httpMethod = "POST"; req.httpBody = name.data(using: .utf8); req.timeoutInterval = 3
         URLSession.shared.dataTask(with: req) { _, resp, err in
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
@@ -346,7 +398,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     func menu() -> NSMenu {
         let m = NSMenu()
-        m.addItem(item(link.connected ? "Connected to the bridge" : "On his own (the bridge isn't connected)", nil))
+        m.addItem(item(bridgeConnected ? "Connected to the bridge" : "On his own (the bridge isn't connected)", nil))
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
         var gagItems = [item("A Random Gag", #selector(playNamed(_:)), rep: "tap"), NSMenuItem.separator()]
@@ -386,7 +438,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         panel.setFrame(NSRect(x: x, y: y, width: v, height: v), display: true)
         clampOnScreen()
     }
-    @objc func pickLook(_ s: NSMenuItem) { if let v = s.representedObject as? String { look = v; js("desk.setLook('\(v)')") } }
+    @objc func pickLook(_ s: NSMenuItem) { if let v = s.representedObject as? String { look = v; js("desk.setLook('\(look)')") } }
     @objc func pickCorner(_ s: NSMenuItem) { if let c = s.representedObject as? String { moveTo(cornerOrigin(c, on: visibleFrame()), animate: true) } }
     @objc func toggleSnap() { snap.toggle(); if snap { moved() } }
     @objc func toggleLayer() { onDesktop.toggle(); applyLayer(); panel.orderFrontRegardless() }

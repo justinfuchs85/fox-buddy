@@ -167,6 +167,8 @@ PLANE_GAP = 60                          # at most one paper plane a minute, howe
 PLANE_FRESH = 10 * 60                   # older messages (the bridge was down, the Mac asleep) get no plane
 
 os.makedirs(HOME, exist_ok=True)
+try: os.chmod(HOME, 0o700)              # config (Slack token, calendar link), logs and state: yours alone
+except OSError: pass
 log = logging.getLogger("bridge")
 log.setLevel(logging.INFO)
 _h = logging.handlers.RotatingFileHandler(os.path.join(HOME, "bridge.log"), maxBytes=500_000, backupCount=2)
@@ -565,6 +567,8 @@ class Sounds:
 
     def play(self, moment, force=False):
         """Play one of the picked versions of a moment. force skips every check (for testing)."""
+        if not re.fullmatch(r"[a-z0-9_]{1,60}", moment or ""):
+            return False                                       # a name, never a path
         with self.lock:
             cfg, now = self.settings(), time.time()
             m = (cfg.get("moments") or {}).get(moment, {})
@@ -603,6 +607,8 @@ class Sounds:
     def play_gag(self, event, force=False):
         """The board started a gag (event "tap_<gag>_<mood>"): play its sound in step with the drawings,
         at the volume from sounds.json. On/off: "enabled" and the "tap_gags" moment (on if missing)."""
+        if not re.fullmatch(r"tap_[a-z0-9_]{1,60}", event or ""):
+            return False                                       # a name, never a path
         gag, _, mood = event[4:].rpartition("_")
         if gag == "prep" and mood == "meeting":
             gag = "prep_alarm"                                # at the alarm itself, prep starts with the clock ringing
@@ -1655,15 +1661,39 @@ class SlackWatch:
 buddy = None
 
 
+# Who may talk to the bridge. It only listens on 127.0.0.1, but a web page in a browser can still send
+# requests there (or, with DNS rebinding, read the answers), so:
+#   Host must be this machine by name (a rebinding attack arrives with its own domain in Host);
+#   requests a browser makes carry an Origin header, and only the Lump for claude.ai extension
+#   (tools/browserwatch, origin chrome-extension://...) is let in, and only to /browser.
+# Hooks, the status line, the app watcher and Desktop Lump send no Origin, so they're unaffected.
+ALLOWED_HOSTS = {f"127.0.0.1:{HTTP_PORT}", f"localhost:{HTTP_PORT}", "127.0.0.1", "localhost"}
+MAX_BODY = 2_000_000                    # hook payloads can carry a big tool result; nothing legitimate is bigger
+SOUND_NAME = re.compile(r"[a-z0-9_]{1,60}")
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def _allowed(self):
+        if (self.headers.get("Host") or "").strip().lower() not in ALLOWED_HOSTS:
+            return False
+        origin = self.headers.get("Origin")
+        return origin is None or (origin.startswith("chrome-extension://") and self.path == "/browser")
 
     def _reply(self, code, body=b"", ctype="text/plain"):
         self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
     def do_POST(self):
-        body = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+        if not self._allowed():
+            log.info("refused POST %s (host %r, origin %r)", self.path[:40], (self.headers.get("Host") or "")[:60], (self.headers.get("Origin") or "")[:60])
+            return self._reply(403, b"forbidden")
+        try: length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError: return self._reply(400)
+        if length < 0 or length > MAX_BODY:
+            return self._reply(413)
+        body = self.rfile.read(length)
         if self.path == "/hook":
             self._reply(204)                      # answer first so the hook never waits on us
             try: buddy.hook(json.loads(body or b"{}"))
@@ -1695,7 +1725,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if cmd and cmd[0] in ("on", "off", "toggle"):
                 on = buddy.sounds.set_enabled({"on": True, "off": False}.get(cmd[0], "toggle"))
                 self._reply(200, b"on" if on else b"off")
-            elif len(cmd) == 2 and cmd[0] == "play":            # a moment, or a gag as the board names it (tap_shock_idle)
+            elif len(cmd) == 2 and cmd[0] == "play" and SOUND_NAME.fullmatch(cmd[1]):   # a moment, or a gag as the board names it (tap_shock_idle)
                 ok = (buddy.sounds.play_gag(cmd[1], force=True) if cmd[1].startswith("tap_") else buddy.sounds.play(cmd[1], force=True))
                 self._reply(200 if ok else 404, b"ok" if ok else b"no such sound")
             else:
@@ -1704,6 +1734,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._reply(404)
 
     def do_GET(self):
+        if not self._allowed():
+            return self._reply(403, b"forbidden")
         if self.path == "/status":
             self._reply(200, json.dumps(buddy.status(), indent=2).encode(), "application/json")
         elif self.path == "/sound":
