@@ -818,7 +818,10 @@ final class Asker {
                         self.session = nil                        // the conversation's gone: the next message starts a new one
                         msg += "\n\nThat conversation is gone, so your next message starts a new one."
                     }
-                    if said.lowercased().contains("login") || said.lowercased().contains("api key") || said.lowercased().contains("auth") {
+                    let low = said.lowercased()
+                    if UserDefaults.standard.bool(forKey: "freePlan") || low.contains("subscription") || low.contains("upgrade") || low.contains("not available on your plan") {
+                        msg = App.FREE_PLAN_NOTE
+                    } else if low.contains("login") || low.contains("api key") || low.contains("auth") {
                         msg = said.lowercased().contains("invalid") || said.contains("401")
                             ? "My Claude sign-in on this Mac stopped working, so I can't answer. Right-click me › Setup › Sign In to Claude… to sign in again."
                             : "I'm not signed in to Claude, so I can't answer yet. Right-click me › Setup › Sign In to Claude… and I'll open the sign-in page."
@@ -1273,19 +1276,41 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     // MARK: Claude Code: installed and signed in, without Terminal
 
-    static func signedIn() -> Bool {
-        guard let claude = Asker.findClaude() else { return false }
+    static func signedIn() -> Bool { account().signedIn }
+
+    /// Whether Claude Code is signed in, and whether that's a free claude.ai account. Claude Code (so his chat)
+    /// needs Pro, Max or a work plan; an API key (Console) account has no plan and is fine.
+    static func account() -> (signedIn: Bool, freePlan: Bool) {
+        guard let claude = Asker.findClaude() else { return (false, false) }
         let r = Setup.run(claude, ["auth", "status", "--json"])
         let d = (try? JSONSerialization.jsonObject(with: Data(r.out.utf8))) as? [String: Any]
-        return d?["loggedIn"] as? Bool == true
+        let signedIn = d?["loggedIn"] as? Bool == true
+        let plan = (d?["subscriptionType"] as? String)?.lowercased() ?? ""
+        let viaClaudeAI = (d?["authMethod"] as? String)?.lowercased() == "claude.ai"
+        return (signedIn, signedIn && viaClaudeAI && (plan.isEmpty || plan == "free"))
+    }
+
+    static let FREE_PLAN_NOTE = """
+    Your Claude account is on the free plan, and my chat runs on Claude Code, which needs Claude Pro or Max. \
+    I'll still hang out and react while Claude works in your browser or the Claude app. For chatting with me, \
+    file search, Gmail and Calendar, upgrade at claude.ai/upgrade, then choose Setup › Sign In to Claude… again.
+    """
+
+    /// Tell a free-plan account once per sign-in why his chat won't work, instead of letting it fail later.
+    func warnIfFreePlan(_ free: Bool) {
+        prefs.set(free, forKey: "freePlan")
+        if free { _ = alert("His chat needs Claude Pro", App.FREE_PLAN_NOTE) }
     }
 
     /// After setup: offer to install Claude Code if it's missing, then to sign in if he isn't.
     func ensureClaude() {
         if Asker.findClaude() == nil { installClaude(); return }
         DispatchQueue.global().async {
-            let ok = App.signedIn()
-            DispatchQueue.main.async { if !ok { self.signIn() } else { self.checkConnections(quiet: true) } }
+            let acct = App.account()
+            DispatchQueue.main.async {
+                if !acct.signedIn { self.signIn() }
+                else { self.warnIfFreePlan(acct.freePlan); if !acct.freePlan { self.checkConnections(quiet: true) } }
+            }
         }
     }
 
@@ -1333,9 +1358,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         DispatchQueue.global().async {
             for _ in 0..<40 where p.isRunning { usleep(250_000) }
             if p.isRunning { p.terminate() }
-            let ok = App.signedIn()
+            let acct = App.account()
             DispatchQueue.main.async {
-                if ok { self.say("Signed in to Claude. Double-click me to chat."); self.checkConnections(quiet: true) }
+                if acct.signedIn && acct.freePlan { self.warnIfFreePlan(true) }
+                else if acct.signedIn { self.prefs.set(false, forKey: "freePlan"); self.say("Signed in to Claude. Double-click me to chat."); self.checkConnections(quiet: true) }
                 else { _ = self.alert("Not signed in yet", "Signing in didn't finish. Try Setup › Sign In to Claude… again.") }
             }
         }

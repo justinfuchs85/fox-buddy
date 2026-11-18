@@ -40,6 +40,13 @@ Accessibility → deskbuddy-appwatch**). Calendar and Slack settings: see the ma
 Using claude.ai in Chrome or Safari instead of the desktop app? Load the extension in
 [`tools/browserwatch`](../browserwatch/README.md) and he reacts to browser chats too.
 
+### Which Claude plan
+
+His chat runs on Claude Code, which needs **Claude Pro, Max** (or a Team, Enterprise or Console account).
+On the free plan he still reacts while Claude works in your browser or the Claude app, but his chat,
+file search, Gmail, Calendar and the morning check-in don't work. He tells you so when you sign in,
+so it doesn't come as a surprise later. On Pro, chatting with him uses the same allowance as claude.ai.
+
 ### On a work Mac
 
 Company networks such as Cloudflare Gateway, Zscaler or Netskope often inspect secure traffic using
