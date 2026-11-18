@@ -1425,7 +1425,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             }
             let claudeV = Asker.findClaude().map { Setup.run($0, ["--version"]).out.trimmingCharacters(in: .whitespacesAndNewlines) } ?? "not installed"
             let acct = App.account()
-            var log = tail("bridge.log", 40) + "\n" + tail("bridge.out", 10)
+            var log = tail("bridge.log", 30) + "\n" + tail("bridge.out", 8) + "\n--- tool gate ---\n" + tail("gate.log", 15)
             log = log.replacingOccurrences(of: home, with: "~")
             if log.count > 3500 { log = "…" + String(log.suffix(3500)) }
             let info = """
@@ -1453,7 +1453,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
                 This opens a new issue on Fox Buddy's GitHub page, filled in with:
 
                 \(info)
-                - the last lines of his log (what he heard from Claude and when; it can include project and folder names, with your home folder's name taken out)
+                - the last lines of his logs (what he heard from Claude and when, and which tools his safety gate allowed or refused; it can include project and folder names, with your home folder's name taken out)
 
                 You can read and change all of it before posting, and nothing is sent unless you post it. Posting needs a free GitHub account.
                 """, buttons: ["Open GitHub", "Show the Log First", "Cancel"])

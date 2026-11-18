@@ -194,13 +194,32 @@ TOOLS = [
 ]
 
 
+GATE_LOG = os.path.expanduser("~/.desk-buddy/gate.log")
+SAME_CALL_SECONDS = 20          # no tool_use_id to go by: an identical call this soon after is the same one, re-checked
+
+
+def log_gate(tool, ok, why=""):
+    """One line per decision: the time, allowed or refused, the tool's name and why. Never its arguments."""
+    try:
+        if os.path.exists(GATE_LOG) and os.path.getsize(GATE_LOG) > 200_000:
+            os.replace(GATE_LOG, GATE_LOG + ".1")
+        with open(os.open(GATE_LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "a") as f:
+            f.write(f"{datetime.now().isoformat(timespec='seconds')} {'allowed' if ok else 'REFUSED'} {tool}"
+                    + (f": {why.split(' The approved call')[0]}" if why else "") + "\n")
+    except OSError:
+        pass
+
+
 def gate(policy_path, stdin):
     """The PreToolUse hook on every tool call in his chats (Claude Code runs `foxtools.py --gate <policy>`).
     Returns (allowed, why). It's the last word, whatever your own Claude Code settings allow:
       - a tool not in the policy's "allow" list is refused,
       - Read only inside the policy's "read_roots" (symlinks resolved),
       - the one approved change (policy "approval": {"tool", "input"}) only with exactly the approved
-        arguments, and only once: it's struck from the policy file as it goes through.
+        arguments, and only for one call. The approval is tied to that call (its tool_use_id) as it goes
+        through, so Claude Code checking the same call again still passes, but a second call is refused.
+        (Before, it was struck out the first time it was seen, and a second check of the same call refused
+        it: approved calendar changes never happened.)
     Anything unexpected (no policy, unreadable input) refuses: it fails closed."""
     try:
         with open(policy_path) as f:
@@ -209,12 +228,21 @@ def gate(policy_path, stdin):
     except (OSError, ValueError) as e:
         return False, f"Fox Buddy's tool gate couldn't read its policy ({type(e).__name__}), so it refused the call."
     tool, args = call.get("tool_name") or "", call.get("tool_input")
+    call_id = call.get("tool_use_id") or None
     approval = policy.get("approval") or None
     if approval and tool == approval.get("tool"):
         if args != approval.get("input"):
             return False, ("Refused: those aren't the arguments the user approved. The approved call is " + tool +
                            " with exactly: " + json.dumps(approval.get("input"), sort_keys=True))
-        policy["approval"] = None                                 # once only
+        used = approval.get("used")
+        if used:                                                   # already gone through: is this that same call?
+            same = (used.get("id") == call_id) if (call_id and used.get("id")) \
+                else (time.time() - float(used.get("at") or 0) <= SAME_CALL_SECONDS)
+            if same:
+                return True, ""
+            return False, ("Refused: the user approved this change once, and it has already been made. "
+                           "Don't make it again; tell the user it's done.")
+        approval["used"] = {"id": call_id, "at": time.time()}    # once only: tied to this call
         tmp = policy_path + ".tmp"
         try:
             with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
@@ -236,7 +264,12 @@ def gate(policy_path, stdin):
 
 def main(argv):
     if len(argv) == 2 and argv[0] == "--gate":
-        ok, why = gate(argv[1], sys.stdin.read())
+        raw = sys.stdin.read()
+        ok, why = gate(argv[1], raw)
+        try:
+            log_gate(json.loads(raw or "{}").get("tool_name") or "?", ok, why)
+        except ValueError:
+            log_gate("?", ok, why)
         if not ok:
             sys.stderr.write(why + "\n")
         sys.exit(0 if ok else 2)                                  # exit 2: Claude Code blocks the call and tells him why
