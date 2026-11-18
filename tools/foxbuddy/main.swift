@@ -909,7 +909,26 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         set { prefs.set(newValue, forKey: "snap") }
     }
 
+    /// Another copy of him already running (an update dragged over a running one, a second double-click):
+    /// two of him fight over the same connection to the bridge, and both just sleep. So the newer copy
+    /// leaves, after a few seconds' grace for one that's on its way out (a quit, or Sparkle's restart).
+    static func anotherCopyRunning() -> NSRunningApplication? {
+        let me = ProcessInfo.processInfo.processIdentifier, id = Bundle.main.bundleIdentifier ?? "com.foxbuddy.app"
+        let others = { NSRunningApplication.runningApplications(withBundleIdentifier: id).filter { $0.processIdentifier != me && !$0.isTerminated } }
+        let deadline = Date().addingTimeInterval(4)
+        while let other = others().first {
+            if Date() > deadline { return other }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        return nil
+    }
+
     func applicationDidFinishLaunching(_ n: Notification) {
+        if let other = App.anotherCopyRunning() {
+            NSLog("foxbuddy: another copy is running (pid \(other.processIdentifier)), so this one is leaving")
+            other.activate(options: [])
+            NSApp.terminate(nil); return
+        }
         guard let webDir = Bundle.main.url(forResource: "web", withExtension: nil) else {
             NSLog("foxbuddy: no web folder in the app bundle (build it with tools/foxbuddy/build.sh)"); NSApp.terminate(nil); return
         }
