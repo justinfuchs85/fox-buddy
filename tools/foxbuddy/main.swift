@@ -1167,7 +1167,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         var setupItems: [NSMenuItem] = [item("Set Up Fox Buddy…", #selector(setUp))]
         setupItems.append(item("Sign In to Claude…", #selector(signIn)))
         setupItems.append(item("Connect Gmail & Calendar…", #selector(connectGoogle)))
-        setupItems.append(item("Check Connections", #selector(checkConnections)))
+        setupItems.append(item("Check Connections", #selector(checkConnectionsNow)))
         setupItems.append(item("Watch the Claude Desktop App", Setup.watcher == nil ? nil : #selector(toggleWatching), on: Setup.watching))
         setupItems.append(item("Browser Extension for claude.ai…", #selector(showExtension)))
         setupItems.append(.separator())
@@ -1288,7 +1288,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         """)
     }
 
-    @objc func checkConnections() { checkConnections(quiet: false) }
+    @objc func checkConnectionsNow() { checkConnections(quiet: false) }
     func checkConnections(quiet: Bool) {
         DispatchQueue.global().async {
             let found = Connectors.check()
