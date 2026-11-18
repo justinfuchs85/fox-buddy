@@ -168,10 +168,12 @@
     chat(focus = true) { clearTimeout(ttlTimer); $('card').className = ''; mode('chat'); scrollDown(); if (focus) setTimeout(() => $('input').focus(), 30); },
     thinking(q) { turns.push({ you: q, fox: '' }); addYou(q); pending(); setBusy(true); mode('chat'); scrollDown(); },
     answer(text) { dropPending(); setBusy(false);
-      // A change he wants to make arrives as a ```fox-confirm block: one tool and its exact arguments. It becomes a card
+      // A calendar or Gmail change arrives as a ```fox-confirm block: one tool and its exact arguments. It becomes a card
       // showing all of them, never text. (The app checks the tool again, and the gate holds him to these arguments.)
+      // A note for him to remember or forget arrives as a last line "[[confirm remember: ...]]": the app saves it itself.
       let ask = null, unreadable = false;
-      text = String(text).replace(/```fox-confirm[ \t]*\n([\s\S]*?)```/g, (m, body) => { ask = proposal(body); if (!ask) unreadable = true; return ''; }).trim();
+      text = String(text).replace(/```fox-confirm[ \t]*\n([\s\S]*?)```/g, (m, body) => { ask = proposal(body); if (!ask) unreadable = true; return ''; });
+      text = text.replace(/^[ \t]*\[\[confirm (remember|forget):[ \t]*([^\]\n]{1,500})\]\][ \t]*$/gim, (m, kind, what) => { ask = { kind: kind.toLowerCase(), summary: what.trim() }; return ''; }).trim();
       if (ask) unreadable = false;
       if (turns.length) turns[turns.length - 1].fox = text;
       const d = addFox(markdown(text) + '<div class="tools"><button class="link copy">Copy</button></div>');
@@ -188,6 +190,8 @@
         n.innerHTML = '<div class="result">He proposed a change, but not in a form that can be checked, so there\'s nothing to approve. Ask him again.</div>'; d.appendChild(n); }
       scrollDown(); report(); },
     error(text) { dropPending(); setBusy(false); addFox(markdown(text), 'err'); scrollDown(); report(); },
+    info(text) { addFox(esc(text), 'err'); scrollDown(); report(); },
+    brief(text) { window.bubble.reset(); turns.push({ you: 'Morning check-in, please.', fox: '' }); window.bubble.answer(text); },
     stopped(why) { if (!busy) return; dropPending(); setBusy(false); addFox(esc(why || 'Stopped.'), 'err'); report(); },
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };
@@ -205,18 +209,21 @@
   // Only the newest one can be approved; sending anything else cancels it.
   function confirmCard(d, ask) {
     settleAll('Not done.');
+    const local = ask.kind === 'remember' || ask.kind === 'forget';        // his notes: the app does it, no reply needed
     const calendar = CALENDAR_TOOLS.includes(ask.tool);
-    const emails = [...new Set(JSON.stringify(ask.input).match(EMAIL) || [])];
-    const warn = calendar && emails.length && ask.tool !== 'delete_event'
-      ? `<div class="warn">Google Calendar may email: ${esc(emails.join(', '))}</div>`
+    const emails = local ? [] : [...new Set(JSON.stringify(ask.input).match(EMAIL) || [])];
+    const warn = local ? ''
+      : calendar && emails.length && ask.tool !== 'delete_event' ? `<div class="warn">Google Calendar may email: ${esc(emails.join(', '))}</div>`
       : !calendar ? '<div class="note">Saved as a draft in Gmail. Nothing is sent.</div>' : '';
-    const rows = Object.entries(ask.input).map(([k, v]) => `<div><span class="k">${esc(k)}</span> ${esc(shown(v))}</div>`).join('');
+    const rows = Object.entries(ask.input || {}).map(([k, v]) => `<div><span class="k">${esc(k)}</span> ${esc(shown(v))}</div>`).join('');
     const card = document.createElement('div'); card.className = 'confirm live';
-    card.innerHTML = `<div class="what">${calendar ? 'Calendar' : 'Gmail draft'}: ${esc(ask.summary)}</div>` + warn +
-      `<details class="args" open><summary>Exactly what he'll do (${esc(ask.tool)})</summary>${rows || '<div>(no arguments)</div>'}</details>` +
-      '<div class="actions"><button class="act primary yes">Yes, do it</button><button class="act no">No</button></div><div class="result" hidden></div>';
+    const label = local ? (ask.kind === 'remember' ? 'Remember' : 'Forget') : calendar ? 'Calendar' : 'Gmail draft';
+    card.innerHTML = `<div class="what">${label}: ${esc(ask.summary)}</div>` + warn +
+      (local ? '' : `<details class="args" open><summary>Exactly what he'll do (${esc(ask.tool)})</summary>${rows || '<div>(no arguments)</div>'}</details>`) +
+      `<div class="actions"><button class="act primary yes">${local ? (ask.kind === 'remember' ? 'Save it' : 'Forget it') : 'Yes, do it'}</button><button class="act no">No</button></div><div class="result" hidden></div>`;
     card.querySelector('.yes').onclick = () => {
       if (busy) return;
+      if (local) { settle(card, 'Approved.'); post({ confirm: ask }); return; }
       settle(card, 'Approved.');
       turns.push({ you: 'Yes, do it: ' + ask.summary, fox: '' }); addYou('Yes, do it'); pending(); setBusy(true); scrollDown();
       post({ confirm: ask });
