@@ -2,7 +2,7 @@
 # notarized by Apple (so it opens with a double-click), as a .dmg and a .zip.
 #
 #   Push a tag like v1.2.0  ->  a GitHub Release with both files attached.
-#   Actions > Release > Run workflow  ->  a test build, kept as the run's artifact (no release).
+#   Actions > Release > Run workflow, or a push to a ci/... branch  ->  a test build, kept as the run's artifact.
 #
 # Signing and notarizing need five repository secrets (see RELEASING.md). Without them the build still runs,
 # signed ad hoc: fine for checking it compiles, but macOS won't open that download with a double-click.
@@ -11,6 +11,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+    branches: ["ci/**"]          # a test build from a branch: git push origin HEAD:ci/try
   workflow_dispatch:
 
 permissions:
