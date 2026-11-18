@@ -25,7 +25,15 @@ and you can chat with him.
 - **Extras**: goes from orange toward red as you near your Claude usage limits, holds a ringing clock
   before meetings, holds up a letter for a Slack VIP, and sleeps at night. He's silent.
 
-## Set him up
+## Get him
+
+**Download (easiest):** grab the latest `.dmg` from the [Releases page](https://github.com/justinfuchs85/fox-buddy/releases),
+open it and drag Fox Buddy to Applications. The first time he opens, he offers to set himself up: a small
+background helper (in `~/.desk-buddy`) and Claude Code's hooks. You need [Claude Code](https://claude.com/claude-code),
+signed in, for him to follow Claude and to chat. Right-click him › **Setup** for the Claude-app watcher, the
+browser extension and updates.
+
+## Set him up from the code
 
 You need a Mac with the Xcode command line tools (`xcode-select --install`), Python 3 and Claude Code.
 
@@ -67,6 +75,7 @@ For a second Claude Code profile, run `python3 tools/install_hooks.py --config-d
 | `tools/appwatch` | Reads Chat and Cowork activity from the Claude desktop app (needs Accessibility) |
 | `tools/browserwatch` | Chrome and Safari extension for claude.ai |
 | `tests` | The bridge's tests: `python3 -m unittest discover -s tests` |
+| `.github/workflows/release.yml`, `RELEASING.md` | The signed, notarized download, built on GitHub |
 
 The bridge and the app only listen on `127.0.0.1`, the app's own window makes no internet requests,
 and the browser extension sends labels like "Stop response", never message text. His chats go to

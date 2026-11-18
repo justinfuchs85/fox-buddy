@@ -179,6 +179,129 @@ final class FoxPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+// MARK: - setting up the Mac (the downloaded app does this itself; tools/install_bridge.sh does it for a checkout)
+
+let RELEASES_URL = "https://github.com/justinfuchs85/fox-buddy/releases"
+
+/// Installs and updates what lives outside the app: the bridge (a login item that turns Claude's activity into his
+/// moods), Claude Code's hooks and status line, and optionally the Claude-app watcher. Everything it runs ships
+/// inside the app (Contents/Resources/support, Contents/Helpers), and the bridge runs on macOS's own Python.
+enum Setup {
+    static let fm = FileManager.default
+    static let home = fm.homeDirectoryForCurrentUser
+    static let runtime = home.appendingPathComponent(".desk-buddy")
+    static let agents = home.appendingPathComponent("Library/LaunchAgents")
+    static let bridgeLabel = "com.deskbuddy.bridge", watchLabel = "com.deskbuddy.appwatch"
+    static var support: URL? { Bundle.main.resourceURL?.appendingPathComponent("support/tools") }
+    static var watcher: URL? {
+        let u = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/deskbuddy-appwatch")
+        return fm.isExecutableFile(atPath: u.path) ? u : nil
+    }
+    static var uid: String { String(getuid()) }
+
+    /// Is the bridge set up at all? (No: offer to set up, the first time the app runs.)
+    static var installed: Bool {
+        fm.fileExists(atPath: runtime.appendingPathComponent("bridge.py").path)
+            && fm.fileExists(atPath: agents.appendingPathComponent(bridgeLabel + ".plist").path)
+    }
+    static var hasCommandLineTools: Bool { run("/usr/bin/xcode-select", ["-p"]).status == 0 }
+
+    @discardableResult
+    static func run(_ tool: String, _ args: [String]) -> (status: Int32, out: String) {
+        let p = Process(), pipe = Pipe()
+        p.executableURL = URL(fileURLWithPath: tool); p.arguments = args
+        p.standardOutput = pipe; p.standardError = pipe; p.standardInput = FileHandle.nullDevice
+        do { try p.run() } catch { return (-1, error.localizedDescription) }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return (p.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
+
+    static func plist(_ label: String, _ args: [String], log: String) -> Data? {
+        let d: [String: Any] = ["Label": label, "ProgramArguments": args, "RunAtLoad": true, "KeepAlive": true,
+                                "StandardOutPath": runtime.appendingPathComponent(log).path,
+                                "StandardErrorPath": runtime.appendingPathComponent(log).path]
+        return try? PropertyListSerialization.data(fromPropertyList: d, format: .xml, options: 0)
+    }
+
+    /// (Re)load a login item from its plist.
+    static func load(_ label: String, _ data: Data) -> Bool {
+        let path = agents.appendingPathComponent(label + ".plist")
+        try? fm.createDirectory(at: agents, withIntermediateDirectories: true)
+        run("/bin/launchctl", ["bootout", "gui/\(uid)/\(label)"])
+        guard (try? data.write(to: path)) != nil else { return false }
+        return run("/bin/launchctl", ["bootstrap", "gui/\(uid)", path.path]).status == 0
+    }
+
+    static func ensureRuntime() {
+        try? fm.createDirectory(at: runtime, withIntermediateDirectories: true)
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: runtime.path)
+        // point the bridge at the app
+        let cfgURL = runtime.appendingPathComponent("config.json")
+        var cfg = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: cfgURL))) as? [String: Any]) ?? [:]
+        if cfg["desktop_lump"] as? Bool != true {
+            cfg["desktop_lump"] = true
+            if let d = try? JSONSerialization.data(withJSONObject: cfg, options: [.prettyPrinted]) { try? d.write(to: cfgURL) }
+        }
+    }
+
+    /// The whole setup. Returns what happened, a line per step, for the dialog.
+    static func install() -> [String] {
+        var report: [String] = []
+        guard let tools = support, fm.fileExists(atPath: tools.appendingPathComponent("buddy_bridge.py").path) else {
+            return ["This copy of the app is missing its support files. Download it again."]
+        }
+        guard hasCommandLineTools else {
+            run("/usr/bin/xcode-select", ["--install"])
+            return ["Fox Buddy needs Apple's command line tools (they include the Python his helpers run on).",
+                    "A window to install them just opened: install them, then choose Set Up Fox Buddy… again."]
+        }
+        ensureRuntime()
+        // the bridge: a copy in ~/.desk-buddy, run at login. A checkout's install keeps its own Python (with the
+        // board and calendar extras); otherwise macOS's.
+        let bridge = runtime.appendingPathComponent("bridge.py")
+        try? fm.removeItem(at: bridge)
+        do { try fm.copyItem(at: tools.appendingPathComponent("buddy_bridge.py"), to: bridge) }
+        catch { return ["Couldn't install the bridge: \(error.localizedDescription)"] }
+        let venv = runtime.appendingPathComponent("venv/bin/python").path
+        let python = fm.isExecutableFile(atPath: venv) ? venv : "/usr/bin/python3"
+        if let d = plist(bridgeLabel, [python, "-u", bridge.path], log: "bridge.out"), load(bridgeLabel, d) {
+            report.append("✓ The bridge is running (it turns what Claude is doing into his moods).")
+        } else {
+            report.append("✗ The bridge didn't start. See ~/.desk-buddy/bridge.out.")
+        }
+        // Claude Code's hooks and status line (install_hooks.py backs up settings.json and keeps your own hooks)
+        let hooks = run("/usr/bin/python3", [tools.appendingPathComponent("install_hooks.py").path])
+        report.append(hooks.status == 0 ? "✓ Claude Code's hooks are in (your settings.json was backed up first)."
+                                        : "✗ Couldn't add Claude Code's hooks: \(hooks.out.prefix(300))")
+        report.append(Asker.findClaude() != nil ? "✓ Claude Code is installed, so you can chat with him."
+                                                : "• To chat with him, install Claude Code (claude.com/claude-code) and sign in.")
+        return report
+    }
+
+    /// After an update, the installed bridge is replaced with the app's copy (and restarted), quietly.
+    static func refreshBridge() {
+        guard installed, let tools = support else { return }
+        let bundled = tools.appendingPathComponent("buddy_bridge.py"), bridge = runtime.appendingPathComponent("bridge.py")
+        guard let a = try? Data(contentsOf: bundled), (try? Data(contentsOf: bridge)) != a else { return }
+        guard (try? a.write(to: bridge)) != nil else { return }
+        run("/bin/launchctl", ["kickstart", "-k", "gui/\(uid)/\(bridgeLabel)"])
+    }
+
+    // The Claude-app watcher: reads the Claude desktop app's window (Chat and Cowork have no hooks); needs Accessibility.
+    static var watching: Bool { fm.fileExists(atPath: agents.appendingPathComponent(watchLabel + ".plist").path) }
+    static func setWatching(_ on: Bool) -> Bool {
+        if !on {
+            run("/bin/launchctl", ["bootout", "gui/\(uid)/\(watchLabel)"])
+            try? fm.removeItem(at: agents.appendingPathComponent(watchLabel + ".plist"))
+            return true
+        }
+        guard let w = watcher, let d = plist(watchLabel, [w.path], log: "appwatch.out") else { return false }
+        ensureRuntime()
+        return load(watchLabel, d)
+    }
+}
+
 // MARK: - the speech bubble
 
 /// The bubble's own small window, beside him. Unlike his, it can take the keyboard (for typing a
@@ -600,6 +723,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         self.webDir = webDir
         DispatchQueue.global().async { Asker.forget(except: nil); Asker.clearGates() }   // last time's chats and gate files
+        DispatchQueue.global().async { Setup.refreshBridge() }                           // an updated app brings its bridge along
+        if !Setup.installed && Bundle.main.url(forResource: "support", withExtension: nil) != nil && !prefs.bool(forKey: "setupOffered") {
+            prefs.set(true, forKey: "setupOffered")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.offerSetup() }
+        }
         makeWindow(webDir)
         link.onLine = { [weak self] line in
             if line.hasPrefix("n ") { self?.narration(String(line.dropFirst(2))) } else { self?.toFox(line) }
@@ -887,12 +1015,80 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             m.addItem(item("Open at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         }
         m.addItem(.separator())
+        var setupItems: [NSMenuItem] = [item("Set Up Fox Buddy…", #selector(setUp))]
+        setupItems.append(item("Watch the Claude Desktop App", Setup.watcher == nil ? nil : #selector(toggleWatching), on: Setup.watching))
+        setupItems.append(item("Browser Extension for claude.ai…", #selector(showExtension)))
+        setupItems.append(.separator())
+        setupItems.append(item("Check for Updates…", #selector(checkUpdates)))
+        m.addItem(sub("Setup", setupItems))
         m.addItem(item("Hide (Open Fox Buddy Again to Bring Him Back)", #selector(hideHim)))
         m.addItem(item("Quit Fox Buddy", #selector(quit), key: "q"))
         return m
     }
 
     @objc func tapNow() { js("desk.tap()") }
+
+    // MARK: setup
+    func alert(_ title: String, _ text: String, buttons: [String] = ["OK"]) -> NSApplication.ModalResponse {
+        let a = NSAlert(); a.messageText = title; a.informativeText = text
+        buttons.forEach { a.addButton(withTitle: $0) }
+        NSApp.activate(ignoringOtherApps: true)
+        return a.runModal()
+    }
+    func offerSetup() {
+        let r = alert("Set up Fox Buddy?", """
+        To keep an eye on Claude for you, Fox Buddy installs two things:
+
+        • A small helper that runs in the background (in ~/.desk-buddy) and turns what Claude is doing into his moods.
+        • Hooks and a status line in Claude Code's settings (~/.claude/settings.json, backed up first; your own hooks stay).
+
+        You can do this later from his right-click menu: Setup › Set Up Fox Buddy….
+        """, buttons: ["Set Up", "Not Now"])
+        if r == .alertFirstButtonReturn { setUp() }
+    }
+    @objc func setUp() {
+        DispatchQueue.global().async {
+            let report = Setup.install()
+            DispatchQueue.main.async { _ = self.alert("Fox Buddy setup", report.joined(separator: "\n\n")) }
+        }
+    }
+    @objc func toggleWatching() {
+        let on = !Setup.watching
+        if on {
+            let r = alert("Watch the Claude desktop app?", """
+            Chat and Cowork in the Claude desktop app don't report what they're doing, so a small helper reads the \
+            app's window (only the Claude app's) to tell when Claude is working or waiting for you. macOS will ask you \
+            to allow "deskbuddy-appwatch" under System Settings › Privacy & Security › Accessibility.
+
+            Using claude.ai in a browser instead? Use the browser extension (Setup › Browser Extension…).
+            """, buttons: ["Turn On", "Cancel"])
+            guard r == .alertFirstButtonReturn else { return }
+        }
+        if !Setup.setWatching(on) { _ = alert("Couldn't change the watcher", "See ~/.desk-buddy/appwatch.out.") }
+    }
+    @objc func showExtension() {
+        guard let ext = Bundle.main.resourceURL?.appendingPathComponent("support/browserwatch"),
+              FileManager.default.fileExists(atPath: ext.path) else { return }
+        // Chrome won't load an extension from inside an app: give it a copy in ~/.desk-buddy
+        let dest = Setup.runtime.appendingPathComponent("browser-extension")
+        Setup.ensureRuntime()
+        try? FileManager.default.removeItem(at: dest)
+        try? FileManager.default.copyItem(at: ext, to: dest)
+        NSWorkspace.shared.activateFileViewerSelecting([dest])
+        _ = alert("Browser extension for claude.ai", """
+        So he reacts to Claude in your browser too. The extension's folder is open in Finder (~/.desk-buddy/browser-extension).
+
+        Chrome: open chrome://extensions, turn on Developer mode, click Load unpacked, and pick that folder.
+        Safari 18.4 or later: Settings › Advanced › Show features for web developers, then Settings › Developer › Add Temporary Extension…, and pick that folder.
+
+        It sends the fox status labels like "Stop response", never your messages.
+        """)
+    }
+    @objc func checkUpdates() {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let r = alert("Fox Buddy \(v)", "New versions are on the Releases page: download the latest, and drag it over this one in Applications.", buttons: ["Open Releases", "Close"])
+        if r == .alertFirstButtonReturn, let u = URL(string: RELEASES_URL) { NSWorkspace.shared.open(u) }
+    }
     @objc func playNamed(_ s: NSMenuItem) { if let n = s.representedObject as? String { play(n) } }
     @objc func playRandomClip() { if let n = clips.randomElement() { play(n) } }
     @objc func demo() { toFox("s demo") }

@@ -77,6 +77,9 @@ Using claude.ai in Chrome or Safari instead of the desktop app? Load the extensi
   - **Move to**: a corner
   - **Float Above Windows**: turn it off to keep him on the desktop, behind your windows
   - **Open at Login**
+  - **Setup**: **Set Up Fox Buddy…** (installs or repairs the bridge and Claude Code's hooks; the downloaded app
+    offers this the first time it opens), **Watch the Claude Desktop App** (the Accessibility helper),
+    **Browser Extension for claude.ai…**, and **Check for Updates…**
   - **Hide**
   - **Quit**
 - Clicks on the empty space around him go through to whatever is underneath.

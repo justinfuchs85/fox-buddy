@@ -47,8 +47,36 @@ Extras for debugging:  GET /status   POST /cmd  (body: a raw command such as "s 
                        (play tap_<gag>_<mood> plays a gag's sound, e.g. play tap_shock_idle)
 Install as a login item with tools/install_bridge.sh.
 """
-import glob, http.server, json, logging, logging.handlers, os, random, re, subprocess, sys, threading, time, wave
-import serial
+import glob, http.server, json, logging, logging.handlers, os, random, re, socket, subprocess, sys, threading, time, wave
+try:
+    import serial                      # pyserial: only needed for a board on USB (tools/install_bridge.sh installs it)
+except ImportError:                    # the downloaded app runs the bridge on macOS's own Python, without it
+    serial = None
+
+
+class PlainSocket:
+    """Just enough of pyserial's socket:// link (read, write, flush, close) for the desktop app, without pyserial."""
+    def __init__(self, ip, port, timeout):
+        self._socket = socket.create_connection((ip, int(port)), timeout=3)
+        self._socket.settimeout(timeout)
+
+    def read(self, n):
+        try:
+            data = self._socket.recv(n)
+        except socket.timeout:
+            return b""
+        if not data:
+            raise OSError("connection closed")
+        return data
+
+    def write(self, data):
+        self._socket.sendall(data)
+
+    def flush(self):
+        pass
+
+    def close(self):
+        self._socket.close()
 
 HTTP_PORT = 47823
 HOME = os.environ.get("DESKBUDDY_HOME") or os.path.expanduser("~/.desk-buddy")   # tests point this elsewhere
@@ -330,7 +358,7 @@ class Device:
                     # answer the board never gives
                     host, port = p[len("socket://"):].rsplit(":", 1)
                     ip = so.getaddrinfo(host, int(port), so.AF_INET, so.SOCK_STREAM)[0][4][0]
-                    s = serial.serial_for_url(f"socket://{ip}:{port}", timeout=0.3)
+                    s = serial.serial_for_url(f"socket://{ip}:{port}", timeout=0.3) if serial else PlainSocket(ip, port, 0.3)
                     sock = getattr(s, "_socket", None)
                     if sock:                   # notice a board that vanished from the network
                         sock.setsockopt(so.SOL_SOCKET, so.SO_KEEPALIVE, 1)
@@ -341,6 +369,8 @@ class Device:
                     s.write(f"k {read_config().get('lump_token', '')}\n".encode())
                     self.link = "desktop" if ip == DESKTOP_HOST else "wifi"
                 else:
+                    if serial is None:
+                        raise OSError("a board on USB needs pyserial (tools/install_bridge.sh installs it)")
                     s = serial.Serial(); s.port, s.baudrate, s.timeout = p, 115200, 0.3
                     s.dtr = False; s.rts = False      # don't reset the board when opening
                     s.open()
@@ -441,7 +471,10 @@ class Calendar:
         if not url:
             return
         import datetime, urllib.request
-        import icalendar, recurring_ical_events
+        try:
+            import icalendar, recurring_ical_events
+        except ImportError:
+            log.info("calendar_ics needs the icalendar packages (tools/install_bridge.sh installs them)"); return
         data = urllib.request.urlopen(url, timeout=20).read()
         cal = icalendar.Calendar.from_ical(data)
         now = datetime.datetime.now(datetime.timezone.utc)
