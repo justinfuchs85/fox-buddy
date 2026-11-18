@@ -6,6 +6,9 @@
 #
 # Signing and notarizing need repository secrets (see RELEASING.md). Without them the build still runs,
 # signed ad hoc: fine for checking it compiles, but macOS won't open that download with a double-click.
+# One-click updates (Sparkle) need one more secret, SPARKLE_PRIVATE_KEY. Without it the app is built without
+# Sparkle and his update notice offers the DMG instead. With it, each release also gets an appcast.xml (the
+# update feed, signed with that key), and Homebrew's cask is pointed at the new version.
 name: Release
 
 on:
@@ -23,6 +26,8 @@ jobs:
     timeout-minutes: 45
     env:
       HAS_SIGNING: ${{ secrets.MACOS_CERT_P12 != '' && (secrets.NOTARY_KEY_P8 != '' || secrets.NOTARY_APPLE_ID != '') }}
+      HAS_SPARKLE: ${{ secrets.SPARKLE_PRIVATE_KEY != '' }}
+      SPARKLE_VERSION: "2.9.4"
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +38,10 @@ jobs:
 
       - name: Bridge and tool tests
         run: python3 -m unittest discover -s tests
+
+      - name: Homebrew cask style
+        continue-on-error: true
+        run: brew style --cask Casks/fox-buddy.rb
 
       - name: Signing certificate
         if: env.HAS_SIGNING == 'true'
@@ -63,8 +72,34 @@ jobs:
           fi
           echo "SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
 
+      - name: Sparkle, for one-click updates
+        if: env.HAS_SPARKLE == 'true'
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" | tar -xJ -C "$RUNNER_TEMP/sparkle"
+          ( umask 077; printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key" )
+          PUB="$(python3 tools/sparkle_key.py public "$RUNNER_TEMP/sparkle.key")"
+          echo "Update-signing public key: $PUB"
+          echo "SPARKLE_DIR=$RUNNER_TEMP/sparkle" >> "$GITHUB_ENV"
+          echo "SPARKLE_PUBLIC_KEY=$PUB" >> "$GITHUB_ENV"
+          echo "SUFEED_URL=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/appcast.xml" >> "$GITHUB_ENV"
+
       - name: Build
         run: UNIVERSAL=1 zsh tools/foxbuddy/package.sh dist
+
+      - name: Check a build with Sparkle (test builds, before the update key is set up)
+        if: env.HAS_SPARKLE != 'true' && startsWith(github.ref, 'refs/heads/ci/')
+        run: |
+          # compiles, embeds and signs Sparkle with a throwaway key; this copy isn't kept
+          mkdir -p "$RUNNER_TEMP/sparkle-check"
+          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" | tar -xJ -C "$RUNNER_TEMP/sparkle-check"
+          SPARKLE_DIR="$RUNNER_TEMP/sparkle-check" SPARKLE_PUBLIC_KEY="$(head -c 32 /dev/urandom | base64)" SUFEED_URL="https://example.invalid/appcast.xml" \
+            UNIVERSAL=1 zsh tools/foxbuddy/package.sh "$RUNNER_TEMP/sparkle-build"
+          ls "$RUNNER_TEMP/sparkle-build/Fox Buddy.app/Contents/Frameworks"
+          /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$RUNNER_TEMP/sparkle-build/Fox Buddy.app/Contents/Info.plist"
+          otool -L "$RUNNER_TEMP/sparkle-build/Fox Buddy.app/Contents/MacOS/FoxBuddy" | grep Sparkle
 
       - name: Notarize the app
         if: env.HAS_SIGNING == 'true'
@@ -104,7 +139,38 @@ jobs:
             xcrun notarytool submit "out/$NAME.dmg" $NOTARY_ARGS --wait --timeout 30m
             xcrun stapler staple "out/$NAME.dmg"
           fi
+          cp "out/$NAME.dmg" out/Fox-Buddy.dmg      # a name that never changes: .../releases/latest/download/Fox-Buddy.dmg
           ls -l out
+
+      - name: Update feed
+        if: env.HAS_SPARKLE == 'true'
+        run: |
+          # Sparkle installs the zip. Sign it, check the signature against the key in the app, then write the feed.
+          NAME="Fox-Buddy-$VERSION"
+          OUT="$("$SPARKLE_DIR/bin/sign_update" --ed-key-file "$RUNNER_TEMP/sparkle.key" "out/$NAME.zip")"
+          SIG="$(printf '%s' "$OUT" | sed -nE 's/.*sparkle:edSignature="([^"]+)".*/\1/p')"
+          LEN="$(stat -f %z "out/$NAME.zip")"
+          python3 tools/sparkle_key.py verify "$SPARKLE_PUBLIC_KEY" "out/$NAME.zip" "$SIG"
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases"
+          cat > out/appcast.xml <<XML
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Fox Buddy</title>
+              <item>
+                <title>Fox Buddy $VERSION</title>
+                <pubDate>$(LC_ALL=C date -u "+%a, %d %b %Y %H:%M:%S +0000")</pubDate>
+                <sparkle:version>$VERSION</sparkle:version>
+                <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+                <sparkle:fullReleaseNotesLink>$BASE/tag/v$VERSION</sparkle:fullReleaseNotesLink>
+                <description><![CDATA[<p>What's new in Fox Buddy $VERSION is on <a href="$BASE/tag/v$VERSION">GitHub</a>.</p>]]></description>
+                <enclosure url="$BASE/download/v$VERSION/$NAME.zip" length="$LEN" type="application/octet-stream" sparkle:edSignature="$SIG"/>
+              </item>
+            </channel>
+          </rss>
+          XML
+          cat out/appcast.xml
 
       - uses: actions/upload-artifact@v4
         with:
@@ -120,8 +186,19 @@ jobs:
           [ "$HAS_SIGNING" = true ] || NOTE="$NOTE Unsigned test build: right-click the app and choose Open the first time."
           gh release create "$GITHUB_REF_NAME" out/* --title "Fox Buddy $VERSION" --notes "$NOTE" --generate-notes
 
-      - name: Clean up the keychain
-        if: always() && env.HAS_SIGNING == 'true'
+      - name: Homebrew cask
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # Point Casks/fox-buddy.rb at this release, so  brew install --cask fox-buddy  gets it.
+          SHA="$(shasum -a 256 "out/Fox-Buddy-$VERSION.dmg" | cut -d' ' -f1)"
+          git fetch -q origin main && git checkout -q -B main origin/main
+          sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/fox-buddy.rb
+          if git diff --quiet; then echo "cask already up to date"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qam "Homebrew: Fox Buddy $VERSION" && git push -q origin main
+
+      - name: Clean up the keychain and keys
+        if: always() && (env.HAS_SIGNING == 'true' || env.HAS_SPARKLE == 'true')
         run: |
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
-          rm -f "$RUNNER_TEMP/notary.p8"
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/sparkle.key"

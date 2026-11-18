@@ -10,6 +10,8 @@
 #                  and timestamp, ready for notarizing (default: signed ad hoc, fine on the Mac that built it)
 #   TIMESTAMP      codesign's timestamp option (default --timestamp, which notarizing needs; build.sh passes
 #                  --timestamp=none, so a build for this Mac works offline)
+#   SPARKLE_DIR    an unpacked Sparkle 2 download (the folder with Sparkle.framework): builds in one-click updates
+#   SPARKLE_PUBLIC_KEY  the update-signing public key (base64), and SUFEED_URL where the appcast lives
 set -euo pipefail
 HERE="${0:A:h}"
 ROOT="${HERE:h:h}"
@@ -21,20 +23,38 @@ command -v swiftc >/dev/null || { echo "swiftc not found: run  xcode-select --in
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 
-compile() {   # compile <source> <output>
+compile() {   # compile <source> <output> [more swiftc options]
+  local src="$1" dst="$2"; shift 2
   if [ "${UNIVERSAL:-0}" = 1 ]; then
-    swiftc -O -swift-version 5 -target arm64-apple-macos12.0 "$1" -o "$BUILD/arm64"
-    swiftc -O -swift-version 5 -target x86_64-apple-macos12.0 "$1" -o "$BUILD/x86_64"
-    lipo -create "$BUILD/arm64" "$BUILD/x86_64" -output "$2"
+    swiftc -O -swift-version 5 -target arm64-apple-macos12.0 "$@" "$src" -o "$BUILD/arm64"
+    swiftc -O -swift-version 5 -target x86_64-apple-macos12.0 "$@" "$src" -o "$BUILD/x86_64"
+    lipo -create "$BUILD/arm64" "$BUILD/x86_64" -output "$dst"
     rm -f "$BUILD/arm64" "$BUILD/x86_64"
   else
-    swiftc -O -swift-version 5 "$1" -o "$2"
+    swiftc -O -swift-version 5 "$@" "$src" -o "$dst"
   fi
 }
 
+SPARKLE_ARGS=()
+SPARKLE_PLIST=""
+if [ -n "${SPARKLE_DIR:-}" ]; then
+  [ -d "$SPARKLE_DIR/Sparkle.framework" ] || { echo "no Sparkle.framework in $SPARKLE_DIR"; exit 1; }
+  SPARKLE_ARGS=(-D SPARKLE -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @loader_path/../Frameworks)
+  SPARKLE_PLIST="  <key>SUFeedURL</key><string>${SUFEED_URL:?SUFEED_URL is needed with SPARKLE_DIR}</string>
+  <key>SUPublicEDKey</key><string>${SPARKLE_PUBLIC_KEY:?SPARKLE_PUBLIC_KEY is needed with SPARKLE_DIR}</string>
+  <key>SUEnableAutomaticChecks</key><false/>
+  <key>SUAutomaticallyUpdate</key><false/>"
+fi
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources/web/fox" "$APP/Contents/Resources/support/tools"
-compile "$HERE/main.swift" "$APP/Contents/MacOS/FoxBuddy"
+compile "$HERE/main.swift" "$APP/Contents/MacOS/FoxBuddy" "${SPARKLE_ARGS[@]}"
+if [ -n "${SPARKLE_DIR:-}" ]; then
+  # Sparkle, without its XPC services (only sandboxed apps need them); ditto keeps the framework's symlinks
+  mkdir -p "$APP/Contents/Frameworks"
+  ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+  rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
+fi
 compile "$ROOT/tools/appwatch/main.swift" "$APP/Contents/Helpers/deskbuddy-appwatch"
 
 # the fox (characters/fox), the desktop player and the speech bubble
@@ -70,6 +90,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><true/>
   <key>NSAppSleepDisabled</key><true/>
   <key>NSHumanReadableCopyright</key><string>MIT License. Grew out of desk-buddy, by Joe Bentham.</string>
+$SPARKLE_PLIST
 </dict></plist>
 PLIST
 
@@ -77,6 +98,12 @@ if [ -n "${SIGN_IDENTITY:-}" ]; then
   # inside out: the helper, then the app; hardened runtime and a secure timestamp, as notarizing requires
   TS="${TIMESTAMP:---timestamp}"
   codesign --force --options runtime "$TS" --identifier com.deskbuddy.appwatch --sign "$SIGN_IDENTITY" "$APP/Contents/Helpers/deskbuddy-appwatch"
+  SPK="$APP/Contents/Frameworks/Sparkle.framework"
+  if [ -d "$SPK" ]; then   # Sparkle's helpers first, then the framework itself
+    codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$SPK/Versions/B/Autoupdate"
+    codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$SPK/Versions/B/Updater.app"
+    codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$SPK"
+  fi
   codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$APP"
   codesign --verify --strict --deep --verbose=2 "$APP"
 else

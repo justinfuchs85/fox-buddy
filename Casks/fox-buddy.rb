@@ -1,0 +1,38 @@
+# Homebrew cask for Fox Buddy. The release workflow updates version and sha256 with each release.
+#
+#   brew tap justinfuchs85/fox-buddy https://github.com/justinfuchs85/fox-buddy
+#   brew install --cask fox-buddy
+cask "fox-buddy" do
+  version "1.0.2"
+  sha256 "8d6f6cf3bd761faa6274bc6ac9e4f23f284b76eb6f28ee743c3c5d48835afffb"
+
+  url "https://github.com/justinfuchs85/fox-buddy/releases/download/v#{version}/Fox-Buddy-#{version}.dmg"
+  name "Fox Buddy"
+  desc "Desktop fox who keeps you company while Claude works"
+  homepage "https://justinfuchs85.github.io/fox-buddy/"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  auto_updates true
+  depends_on macos: ">= :monterey"
+
+  app "Fox Buddy.app"
+
+  uninstall quit:      "com.foxbuddy.app",
+            launchctl: ["com.deskbuddy.bridge", "com.deskbuddy.appwatch"]
+
+  zap trash: [
+    "~/.desk-buddy",
+    "~/Library/LaunchAgents/com.deskbuddy.appwatch.plist",
+    "~/Library/LaunchAgents/com.deskbuddy.bridge.plist",
+    "~/Library/Preferences/com.foxbuddy.app.plist",
+  ]
+
+  caveats <<~EOS
+    His chat runs on Claude Code, signed in with a Claude Pro or Max account.
+    Open Fox Buddy and choose Set Up when he asks: he installs and signs in to Claude Code for you.
+  EOS
+end

@@ -241,9 +241,11 @@
       mode('welcome'); wRender();
     },
     // a newer version of him is out
-    update(v, mine) {
-      const d = addFox(markdown(`**There's a new version of me: ${v}.** You have ${mine}. It's a quick swap, and your settings stay put.`) +
-        '<div class="tools"><button class="link dl">Download</button> <button class="link notes">What\'s new</button> <button class="link later">Not now</button></div>');
+    update(v, mine, oneClick) {
+      const d = addFox(markdown(`**There's a new version of me: ${v}.** You have ${mine}. ` + (oneClick
+          ? "One click and I'll update myself and restart, and your settings stay put."
+          : "It's a quick swap, and your settings stay put.")) +
+        '<div class="tools"><button class="link dl">' + (oneClick ? 'Update' : 'Download') + '</button> <button class="link notes">What\'s new</button> <button class="link later">Not now</button></div>');
       d.querySelector('.dl').onclick = () => post({ update: 'download' });
       d.querySelector('.notes').onclick = () => post({ update: 'notes' });
       d.querySelector('.later').onclick = () => post({ action: 'dismiss' });

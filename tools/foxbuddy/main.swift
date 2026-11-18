@@ -16,6 +16,9 @@ import Cocoa
 import Network
 import ServiceManagement
 import WebKit
+#if SPARKLE
+import Sparkle   // release builds only (package.sh with SPARKLE_DIR): one-click updates
+#endif
 
 let BOARD_PORT: UInt16 = 4210
 let BRIDGE = "http://127.0.0.1:47823"
@@ -1483,11 +1486,35 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         prefs.set(rel.version, forKey: "updateSkipped")          // mention each version once (Not now means not again)
         bubbleMode = "chat"; bubbleJump = nil
         bubbleJS("bubble.chat(false)")
-        bubbleJS("bubble.update(\(jsonLiteral(rel.version)), \(jsonLiteral(App.version)))")
+        bubbleJS("bubble.update(\(jsonLiteral(rel.version)), \(jsonLiteral(App.version)), \(App.oneClickUpdates))")
         showBubble(key: false)
     }
 
+    #if SPARKLE
+    /// Sparkle does the downloading, checking the signature and swapping him out. It doesn't check on a
+    /// schedule of its own (Info.plist turns that off): he tells you about updates himself, in his chat.
+    lazy var updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    static let oneClickUpdates = true
+    #else
+    static let oneClickUpdates = false
+    #endif
+
+    /// "Update" in his chat: install it with Sparkle, or (a build without it) download the DMG.
+    func installUpdate() {
+        #if SPARKLE
+        NSApp.activate(ignoringOtherApps: true)
+        updater.checkForUpdates(nil)
+        #else
+        guard let rel = updateOffer else { return }
+        NSWorkspace.shared.open(rel.download)
+        say("Downloading. Open the DMG from your Downloads, drag me into Applications and choose Replace. Your settings stay put.")
+        #endif
+    }
+
     @objc func checkUpdates() {
+        #if SPARKLE
+        NSApp.activate(ignoringOtherApps: true); updater.checkForUpdates(nil); return
+        #endif
         fetchLatest { [weak self] rel in
             guard let self = self else { return }
             if let rel = rel, App.isNewer(rel.version, than: App.version) { self.updateOffer = rel; self.offerUpdate(force: true) }
@@ -1659,7 +1686,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if body["newChat"] as? Bool == true { asker.reset() }
         if body["editNotes"] as? Bool == true { openNotesFile() }
         if let u = body["update"] as? String {
-            if u == "download", let rel = updateOffer { NSWorkspace.shared.open(rel.download); say("Downloading. Open the DMG from your Downloads, drag me into Applications and choose Replace. Your settings stay put.") }
+            if u == "download" { installUpdate() }
             if u == "notes", let rel = updateOffer { NSWorkspace.shared.open(rel.page) }
         }
         if let q = body["open"] as? String, !q.isEmpty {
