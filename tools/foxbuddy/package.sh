@@ -6,8 +6,10 @@
 # Environment (all optional):
 #   VERSION        the app's version (default 1.0)
 #   UNIVERSAL=1    build for Apple silicon and Intel Macs both (default: this Mac's kind only)
-#   SIGN_IDENTITY  a "Developer ID Application: …" identity to sign with, hardened runtime and timestamp, ready
-#                  for notarizing (default: signed ad hoc, fine on the Mac that built it)
+#   SIGN_IDENTITY  a "Developer ID Application: …" identity (its name or SHA-1) to sign with, hardened runtime
+#                  and timestamp, ready for notarizing (default: signed ad hoc, fine on the Mac that built it)
+#   TIMESTAMP      codesign's timestamp option (default --timestamp, which notarizing needs; build.sh passes
+#                  --timestamp=none, so a build for this Mac works offline)
 set -euo pipefail
 HERE="${0:A:h}"
 ROOT="${HERE:h:h}"
@@ -73,8 +75,9 @@ PLIST
 
 if [ -n "${SIGN_IDENTITY:-}" ]; then
   # inside out: the helper, then the app; hardened runtime and a secure timestamp, as notarizing requires
-  codesign --force --options runtime --timestamp --identifier com.deskbuddy.appwatch --sign "$SIGN_IDENTITY" "$APP/Contents/Helpers/deskbuddy-appwatch"
-  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+  TS="${TIMESTAMP:---timestamp}"
+  codesign --force --options runtime "$TS" --identifier com.deskbuddy.appwatch --sign "$SIGN_IDENTITY" "$APP/Contents/Helpers/deskbuddy-appwatch"
+  codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$APP"
   codesign --verify --strict --deep --verbose=2 "$APP"
 else
   codesign --force --deep --sign - "$APP"

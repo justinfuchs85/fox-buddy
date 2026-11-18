@@ -10,7 +10,13 @@ command -v swiftc >/dev/null || { echo "swiftc not found: run  xcode-select --in
 
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
-zsh "$HERE/package.sh" "$BUILD"
+# Signed with your Developer ID when this Mac has one (by its SHA-1, since the same certificate can show up
+# twice): macOS then remembers the folder and Accessibility permissions you gave him across rebuilds, which it
+# doesn't for an ad hoc signature. No notarizing needed for a build that stays on this Mac.
+if [ -z "${SIGN_IDENTITY:-}" ]; then
+  SIGN_IDENTITY="$( { security find-identity -v -p codesigning 2>/dev/null || true; } | awk '/Developer ID Application/ {print $2; exit}')"
+fi
+SIGN_IDENTITY="$SIGN_IDENTITY" TIMESTAMP="--timestamp=none" zsh "$HERE/package.sh" "$BUILD"
 
 # The app from before the rename (Desktop Lump) shouldn't keep running alongside him.
 pkill -x DesktopLump 2>/dev/null || true

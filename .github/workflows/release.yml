@@ -56,7 +56,7 @@ jobs:
           done
           echo "Signing identities in the certificate file (names only):"
           security find-identity -p codesigning "$KC" | sed -E 's/^ *[0-9]+\) [0-9A-F]+ /  /'
-          ID="$(security find-identity -v -p codesigning "$KC" | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          ID="$(security find-identity -v -p codesigning "$KC" | awk '/Developer ID Application/ {print $2; exit}')"   # its SHA-1: never ambiguous
           if [ -z "$ID" ]; then
             echo "::error::MACOS_CERT_P12 has no valid 'Developer ID Application' identity (see the list above). Export that certificate, with its private key, from Keychain Access › login › My Certificates."
             exit 1
