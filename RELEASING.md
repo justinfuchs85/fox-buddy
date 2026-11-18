@@ -60,7 +60,15 @@ fox's drawing code publishes https://justinfuchs85.github.io/fox-buddy/ (the Web
 ## Each release
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+zsh ship.sh            # or /foxship in Claude Code, opened in this folder
+```
+
+It checks you're on an up-to-date, clean `main`, lists what changed since the last release, picks the next
+version (`1.0.4` after `1.0.3`; `zsh ship.sh minor`, `major` or `1.2.3` for others), asks, then tags and pushes
+it. That's the same as doing it by hand:
+
+```bash
+git pull && git tag v1.0.4 && git push origin v1.0.4
 ```
 
 About 10 minutes later the release is on the Releases page with `Fox-Buddy-1.0.0.dmg`, `.zip`, `Fox-Buddy.dmg`
