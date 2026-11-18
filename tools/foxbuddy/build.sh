@@ -60,6 +60,13 @@ except Exception: cfg = {}
 if not cfg.get("desktop_lump"):
     cfg["desktop_lump"] = True; json.dump(cfg, open(p, "w"), indent=2); print("pointed the bridge at the app in", p)
 PY
+# Lump's voice, left over from before Fox Buddy (his sound files and the settings that played them):
+# the fox is silent, and those sounds aren't ours to keep. Once only, so sounds you add yourself later stay.
+if [ ! -e "$HOME/.desk-buddy/.lump-sounds-removed" ] && { [ -e "$HOME/.desk-buddy/sounds" ] || [ -e "$HOME/.desk-buddy/sounds.json" ]; }; then
+  rm -rf "$HOME/.desk-buddy/sounds" "$HOME/.desk-buddy/sounds.json"
+  echo "removed Lump's old sounds: the fox is silent"
+fi
+touch "$HOME/.desk-buddy/.lump-sounds-removed"
 # A bridge that's already installed gets this version of itself.
 if [ -f "$HOME/.desk-buddy/bridge.py" ] && ! cmp -s "$ROOT/tools/buddy_bridge.py" "$HOME/.desk-buddy/bridge.py"; then
   cp "$ROOT/tools/buddy_bridge.py" "$HOME/.desk-buddy/bridge.py"
