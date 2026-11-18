@@ -8,6 +8,7 @@
 // The bridge talks to it one line at a time:
 //   s <mood>  e <event>  o <working> <waiting> <unseen>  c <rrggbb>  p <0|1>  h <secs>  k <token>  X  ?
 //   t <clip>  (this clip is one of the tap reactions)   n <json>  (a line of narration for the bubble)
+//   a <act>   (only this work act while he works, e.g. "a accountant"; "a -" for all three again)
 // and hears back "tap", "gag <name>", "tapclip <name>", "resync" and "ok ..." lines.
 //
 // The app passes lines in with desk.line(text) and gets ours from the "fox" message handler.
@@ -36,12 +37,17 @@
   function seqOf(kind, key) {
     const ck = kind + ':' + key;
     if (!cache.has(ck)) {
-      const raw = kind === 'loop' ? L.LOOPS[key] : kind === 'trans' ? L.TRANS[key] : L.CLIPS[key].seq;
+      const raw = kind === 'loop' ? L.LOOPS[key] : kind === 'trans' ? L.TRANS[key] : kind === 'swap' ? L.SWAPS[key] : L.CLIPS[key].seq;
       cache.set(ck, expand(raw).filter(id => L.D[id]));
     }
     return cache.get(ck);
   }
-  const loopOf = m => ({ kind: 'loop', key: m, from: m, to: m });
+  // One work act only (the accountant, for money questions: "a accountant", "a -" to stop), or null for the usual rotation.
+  let act = null;
+  const loopOf = m => {
+    const v = `${m}.${act}`;
+    return { kind: 'loop', key: act && L.LOOPS[v] ? v : m, from: m, to: m };
+  };
   const transOf = (a, b) => L.TRANS[`${a}>${b}`] ? { kind: 'trans', key: `${a}>${b}`, from: a, to: b } : null;
   const eventIndex = n => {
     const c = L.CLIPS[n];
@@ -77,6 +83,20 @@
       return startSeq(e);
     }
     startSeq(loopOf(m)); loopSince = millis();
+  }
+  // Switch to (or back from) one act. Into it: from the start of the rotation, which IS that act, carry on
+  // where he is; from anywhere else, a puff of smoke. Back out: he finishes the act's round, then frame()
+  // picks the full rotation up where it starts, on the same drawing.
+  function setAct(name) {
+    act = name && (L.ACTS || []).includes(name) ? name : null;
+    if (cur.kind !== 'loop') return;                       // takes effect when he next settles
+    const want = loopOf(curMood);
+    if (!act || want.key === cur.key) return;
+    const full = seqOf('loop', cur.key), part = seqOf('loop', want.key);
+    const pos = Math.floor(Math.max(0, millis() - seqStart) * FPS / 1000) % Math.max(1, full.length);
+    if (cur.key === curMood && pos < part.length - 16) { cur = want; seqStart = millis() - pos * 1000 / FPS; lastKey = ''; }   // same drawing, same place
+    else if (L.SWAPS && L.SWAPS[want.key]) startSeq({ kind: 'swap', key: want.key, from: curMood, to: curMood });
+    else startSeq(want);
   }
   function setTarget(m) { target = m; if (cur.kind === 'loop') settle(curMood); }
 
@@ -178,6 +198,7 @@
     }
     if (cmd === 'X') { tap(); return; }
     if (cmd === 'p') { prepMode = parseInt(arg, 10) !== 0; say(`ok prep=${prepMode ? 1 : 0}`); return; }
+    if (cmd === 'a') { setAct(arg === '-' ? null : arg); say('ok act ' + (act || '-')); return; }
     if (cmd === 't') { if (eventIndex(arg)) tapClips.add(arg); say('ok tapclip ' + arg); return; }
     if (cmd === 'i') { say('ok imu=desktop'); return; }
     if (cmd === 'T') { say('ok threshold=click'); return; }
@@ -261,6 +282,9 @@
     let frames = seqOf(cur.kind, cur.key);
     let tick = Math.floor(Math.max(0, now - seqStart) * FPS / 1000);
     if (cur.kind !== 'loop' && tick >= frames.length) { settle(cur.to); tick = 0; frames = seqOf(cur.kind, cur.key); }
+    if (cur.kind === 'loop' && tick >= frames.length && loopOf(curMood).key !== cur.key) {   // an act ended its round: back to the rotation
+      startSeq(loopOf(curMood)); tick = 0; frames = seqOf(cur.kind, cur.key);
+    }
     if (!frames.length) { settle(target); return; }
     const pos = cur.kind === 'loop' ? tick % frames.length : Math.min(tick, frames.length - 1), id = frames[pos];
     if (now - lastFade >= 30 && Math.abs(goal[0] - tintNow[0]) + Math.abs(goal[1] - tintNow[1]) + Math.abs(goal[2] - tintNow[2]) > 1.5) {
@@ -279,7 +303,7 @@
     raw.save();
     if (look === 'glass') { raw.beginPath(); raw.roundRect(0, 0, canvas.width, canvas.height, canvas.width * 0.09); raw.clip(); }
     try {
-      if (cur.kind === 'loop') L.render(ctx, cur.key, id, tick, { dim: false });
+      if (cur.kind === 'loop') L.render(ctx, cur.from, id, tick, { dim: false });
       else L.render(ctx, L.fxFor(id), id, tick, { dim: false });
     } catch (e) { console.error('render', cur.key, id, e); }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -308,9 +332,9 @@
   }
 
   window.desk = {
-    line, tap, setLook, said, hit,
+    line, tap, setLook, said, hit, act: setAct,
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
-    state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
+    state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, act, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
     // for tests: jump the clock forward
     _skip: ms => { seqStart -= ms; loopSince -= ms; lastHost -= ms; },
   };

@@ -892,9 +892,18 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
     }
 
+    /// Money questions get the accountant act while he works (the bridge also asks for it as soon as he
+    /// looks something up in Fuchs Bucks, for the questions these words miss).
+    static let MONEY = try! NSRegularExpression(pattern: #"\b(money|spend|spent|spending|budget|budgets|net ?worth|balances?|savings|debts?|loans?|mortgage|income|paycheck|bills?|costs?|expenses?|transactions?|purchases?|bought|groceries|grocery|dining|restaurants?|subscriptions?|credit cards?|bank|checking|finances?|financial|fuchs ?bucks|dollars?|emergency fund|invest(ment|ments|ing)?|401k|ira|retirement|cash|afford|owe|paid)\b|\$\s?\d"#, options: [.caseInsensitive])
+    func looksLikeMoney(_ q: String) -> Bool {
+        App.MONEY.firstMatch(in: q, range: NSRange(q.startIndex..., in: q)) != nil
+    }
+
     func askFox(_ question: String, approved: (kind: String, summary: String)? = nil) {
+        if approved == nil && looksLikeMoney(question) { js("desk.act('accountant')") }
         asker.ask(question, approved: approved) { [weak self] text, ok in
             guard let self = self else { return }
+            self.js("desk.act(null)")                  // (he finishes the act's round, then goes back to the usual rotation)
             self.bubbleJS(ok ? "bubble.answer(\(self.jsonLiteral(text)))" : "bubble.error(\(self.jsonLiteral(text)))")
             if self.bubbleMode != "chat" && !self.hiddenByUser {          // closed it while he was thinking: show the reply
                 self.bubbleMode = "chat"; self.bubbleJump = nil

@@ -208,6 +208,20 @@
     TRANS[`${a}>${b}`] = seq(`t_${a}_${b}`, frames);
   }
 
+  // ---------- one act on its own ----------
+  // LOOPS['working.accountant'] (and 'longhaul.accountant'): just that act, round and round, for when the
+  // work calls for it (Fox Buddy shows the accountant for money questions). It starts on the same drawings as
+  // the full rotation, so the player can switch over mid-act without a jump; SWAPS[...] is a puff of smoke
+  // for switching from the middle of another act.
+  const ACTS = { accountant };
+  const SWAPS = {};
+  for (const [name, act] of Object.entries(ACTS)) for (const m of HOLD) {
+    const frames = act(m === 'longhaul');
+    frames.push([frames[0][0], 8]);                        // and ease back round to the start
+    LOOPS[`${m}.${name}`] = smooth(frames).map(([p, t]) => [add(m, p), t]);
+    SWAPS[`${m}.${name}`] = seq(`swap_${m}_${name}`, tween(frames[0][0], frames[0][0], 10, 1, { poofStart: true, blink: false, squash: 0 }));
+  }
+
   // ---------- events ----------
   const STAND = mix(AWAKE);
   const hold = (p, ticks) => [[p, ticks]];
@@ -503,7 +517,7 @@
 
   window.__character = {
     // silent: his gags ask the bridge for no sounds
-    name: 'fox', GAGS, silent: true, render, fxFor, D, LOOPS, TRANS, CLIPS, MOMENTS, meta,
+    name: 'fox', GAGS, silent: true, render, fxFor, D, LOOPS, TRANS, CLIPS, MOMENTS, meta, SWAPS, ACTS: Object.keys(ACTS),
     setTint: v => { F.tint = v; }, setLine: v => { F.line = v; }, setProp: () => {},
   };
 })();

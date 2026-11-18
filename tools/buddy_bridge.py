@@ -898,6 +898,13 @@ class Buddy:
                 state = "done"
             elif ev == "SessionEnd":
                 self.sessions.pop(sid, None)
+            # The fox's own chat looking things up in Fuchs Bucks: he works as the accountant until it's done.
+            act_line = None
+            if os.path.realpath(s.get("cwd") or "/") == os.path.realpath(QUICK_ASK_DIR):
+                if ev == "PreToolUse" and str(p.get("tool_name") or "").endswith("__finances") and not s.get("act"):
+                    s["act"] = True; act_line = "a accountant"
+                elif ev in ("Stop", "StopFailure", "SessionEnd") and s.pop("act", None):
+                    act_line = "a -"
             prev = s.get("state")
             if state:
                 self._set(s, state, now)
@@ -919,6 +926,8 @@ class Buddy:
             self.event(event)
             self.sound({"hello": "hello", "oops": "uh_oh"}[event])
         self.update()
+        if act_line and getattr(self.dev, "link", None) == "desktop":
+            self.dev.send(act_line, quiet=True)
         if say:
             self.narrate(*say)
 
