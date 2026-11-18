@@ -545,8 +545,24 @@
   }
 
   // ---------- drawing a frame ----------
+  // opts.gaze = [x, y, amount]: he looks that way (x, y about -1..1; up is negative), amount 0..1 easing in.
+  // His eyes go there, his head lifts or turns a little, his ears perk; a blink still blinks.
+  function gazeAt(P, g) {
+    const [gx, gy, a] = g;
+    if (!(a > 0.01)) return P;
+    const eyes = P.eyes === 'closed' || P.eyes === 'wide' || P.eyes === 'x' || P.eyes === 'spiral' ? P.eyes : 'look';
+    const look = P.look || [0, 0];
+    return Object.assign({}, P, {
+      eyes, look: [look[0] + (gx * 3.4 - look[0]) * a, look[1] + (gy * 4 - look[1]) * a],
+      hy: (P.hy || 0) + gy * 7 * a, hx: (P.hx || 0) + gx * 3 * a,
+      tilt: (P.tilt || 0) - gx * 0.08 * a, perk: (P.perk || 1) + 0.09 * a,
+      squash: (P.squash || 0) - (gy < 0 ? 0.035 : -0.02) * a,                 // a little stretch up toward it
+    });
+  }
+
   function render(c, m, id, tick, opts = {}) {
-    const P = D[id] || D[LOOPS.idle[0][0]];
+    let P = D[id] || D[LOOPS.idle[0][0]];
+    if (opts.gaze) P = gazeAt(P, opts.gaze);
     const seed = 11;                                       // the same for every drawing, so nothing jumps between them
     F.now = opts.still ? 0 : (opts.time ?? performance.now() / 1000);
     c.setTransform(1, 0, 0, 1, 0, 0);

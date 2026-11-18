@@ -1140,6 +1140,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
     @objc func screensChanged() { clampOnScreen() }
 
+    /// You're typing in his bubble: he looks toward it. bubblePlaced is "<right|left> <above|below|beside> <room>":
+    /// "right" means he's on the right half of the screen, with the bubble reaching back to his left.
+    func watchTyping() {
+        let parts = bubblePlaced.split(separator: " ").map(String.init)
+        let toLeft = (parts.first ?? "right") == "right", spot = parts.count > 1 ? parts[1] : "above"
+        let side: Double = toLeft ? -1 : 1
+        let (gx, gy): (Double, Double) = spot == "below" ? (side * 0.4, 1) : spot == "beside" ? (side, -0.2) : (side * 0.4, -1)
+        js("desk.watch(\(gx), \(gy))")
+    }
+
     /// The pointer resting on him for a second wakes him if he's asleep (desk.wake decides; it does nothing
     /// otherwise), and staying there keeps him up a little longer.
     var overSince: Date?, lastWakeNudge: Date?
@@ -1794,6 +1804,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if body.keys.contains("welcome") { finishWelcome(body["welcome"] as? [String: Any]) }
         if body["newChat"] as? Bool == true { asker.reset() }
         if body["editNotes"] as? Bool == true { openNotesFile() }
+        if body["typing"] as? Bool == true { watchTyping() }
         if let u = body["update"] as? String {
             if u == "download" { installUpdate() }
             if u == "notes", let rel = updateOffer { NSWorkspace.shared.open(rel.page) }

@@ -419,6 +419,8 @@
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     if (e.key === 'Escape') { e.stopPropagation(); post({ action: 'dismiss' }); }
   });
+  let typedAt = 0;                                   // he watches you type (the app turns him toward the bubble)
+  $('input').addEventListener('keydown', () => { const t = Date.now(); if (t - typedAt > 300) { typedAt = t; post({ typing: true }); } });
   $('input').addEventListener('input', () => { const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight + 2) + 'px'; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') post({ action: 'dismiss' }); });
   mode('say');

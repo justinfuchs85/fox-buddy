@@ -228,6 +228,23 @@
     return true;
   }
   function wakeCheck(now) { if (wakeUntil && now >= wakeUntil) { wakeUntil = 0; want(asked); } }
+  // You're typing in his bubble: he watches you do it, looking toward the bubble (gx, gy: about -1..1,
+  // up negative). Asleep, he wakes up first. It eases in, and back out a moment after you stop.
+  const WATCH_MS = 2500;
+  let watchAt = -1e9, gaze = [0, -1], gazeAmt = 0;
+  function watch(gx, gy) {
+    const now = millis();
+    gaze = [Math.max(-1, Math.min(1, +gx || 0)), Math.max(-1, Math.min(1, +gy || -1))];
+    watchAt = now;
+    if (!wake()) wakeUntil = Math.max(wakeUntil, now + WAKE_MS);     // (already up: stays up while you type)
+    if (curMood === 'idle' && cur.kind === 'loop' && target === 'idle') want(asked);  // dozing in idle: wake() handled it
+  }
+  function gazeNow(now) {
+    const on = now - watchAt < WATCH_MS && cur.kind === 'loop' && curMood !== 'night' ? 1 : 0;
+    gazeAmt += (on - gazeAmt) * (on ? 0.22 : 0.1);
+    if (Math.abs(on - gazeAmt) < 0.01) gazeAmt = on;
+    return gazeAmt > 0.01 ? [gaze[0], gaze[1], gazeAmt] : null;
+  }
 
   // ---------- drawing ----------
   let look = 'float';                 // float: no background, light line, a dark halo so he reads on any wallpaper
@@ -316,7 +333,8 @@
     dimNow += ((night ? 0.55 : 1) - dimNow) * 0.04;
     canvas.style.opacity = dimNow.toFixed(3);
     const ov = offlineMark(now) || ovWorking || ovWaiting || ovUnseen;
-    const key = `${cur.key}|${tick}|${hex(tintNow)}|${look}|${ov ? Math.floor(now / 100) : ''}`;
+    const g = gazeNow(now);
+    const key = `${cur.key}|${tick}|${hex(tintNow)}|${look}|${ov ? Math.floor(now / 100) : ''}|${g ? g[2].toFixed(2) : ''}`;
     if (key === lastKey) return;
     lastKey = key;
     L.setTint(hex(tintNow)); L.setLine(look === 'ink' ? 'paper' : 'glow');
@@ -325,7 +343,7 @@
     raw.save();
     if (look === 'glass') { raw.beginPath(); raw.roundRect(0, 0, canvas.width, canvas.height, canvas.width * 0.09); raw.clip(); }
     try {
-      if (cur.kind === 'loop') L.render(ctx, cur.from, id, tick, { dim: false });
+      if (cur.kind === 'loop') L.render(ctx, cur.from, id, tick, { dim: false, gaze: g });
       else L.render(ctx, L.fxFor(id), id, tick, { dim: false });
     } catch (e) { console.error('render', cur.key, id, e); }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -354,7 +372,7 @@
   }
 
   window.desk = {
-    line, tap, wake, setLook, said, hit, act: setAct, present: setPresent,
+    line, tap, wake, watch, setLook, said, hit, act: setAct, present: setPresent,
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
     state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, act, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
     // for tests: jump the clock forward
