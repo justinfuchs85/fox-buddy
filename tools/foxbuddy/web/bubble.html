@@ -164,7 +164,7 @@
     answer(text) { dropPending(); setBusy(false);
       // A change he wants to make arrives as a last line "[[confirm calendar: ...]]": it becomes a button, never text.
       let ask = null;
-      text = String(text).replace(/^[ \t]*\[\[confirm (calendar|gmail):[ \t]*([^\]\n]{1,500})\]\][ \t]*$/gim, (m, kind, what) => { ask = { kind: kind.toLowerCase(), summary: what.trim() }; return ''; }).trim();
+      text = String(text).replace(/^[ \t]*\[\[confirm (calendar|gmail|remember|forget):[ \t]*([^\]\n]{1,500})\]\][ \t]*$/gim, (m, kind, what) => { ask = { kind: kind.toLowerCase(), summary: what.trim() }; return ''; }).trim();
       if (turns.length) turns[turns.length - 1].fox = text;
       const d = addFox(markdown(text) + '<div class="tools"><button class="link copy">Copy</button></div>');
       d.querySelector('button.copy').onclick = e => { post({ copy: text }); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1200); };
@@ -178,6 +178,8 @@
       if (ask) confirmCard(d, ask);
       scrollDown(); report(); },
     error(text) { dropPending(); setBusy(false); addFox(markdown(text), 'err'); scrollDown(); report(); },
+    info(text) { addFox(esc(text), 'err'); scrollDown(); report(); },
+    brief(text) { window.bubble.reset(); turns.push({ you: 'Morning check-in, please.', fox: '' }); window.bubble.answer(text); },
     stopped(why) { if (!busy) return; dropPending(); setBusy(false); addFox(esc(why || 'Stopped.'), 'err'); report(); },
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };
@@ -185,10 +187,13 @@
   function confirmCard(d, ask) {
     settleAll('Not done.');
     const card = document.createElement('div'); card.className = 'confirm live';
-    card.innerHTML = `<div class="what">${ask.kind === 'calendar' ? 'Calendar change' : 'Gmail draft'}: ${esc(ask.summary)}</div>` +
-      '<div class="actions"><button class="act primary yes">Yes, do it</button><button class="act no">No</button></div><div class="result" hidden></div>';
+    const label = { calendar: 'Calendar change', gmail: 'Gmail draft', remember: 'Remember', forget: 'Forget' }[ask.kind];
+    const local = ask.kind === 'remember' || ask.kind === 'forget';        // his notes: the app does it, no reply needed
+    card.innerHTML = `<div class="what">${label}: ${esc(ask.summary)}</div>` +
+      `<div class="actions"><button class="act primary yes">${local ? (ask.kind === 'remember' ? 'Save it' : 'Forget it') : 'Yes, do it'}</button><button class="act no">No</button></div><div class="result" hidden></div>`;
     card.querySelector('.yes').onclick = () => {
       if (busy) return;
+      if (local) { settle(card, 'Approved.'); post({ confirm: ask }); return; }
       settle(card, 'Approved.');
       turns.push({ you: 'Yes, do it: ' + ask.summary, fox: '' }); addYou('Yes, do it'); pending(); setBusy(true); scrollDown();
       post({ confirm: ask });

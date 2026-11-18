@@ -68,6 +68,7 @@ Using claude.ai in Chrome or Safari instead of the desktop app? Load the extensi
   - **Gags** and **Clips**: play any of them on demand
   - **Show Off**: cycles through every mood
   - **What He Knows About You…**: opens his notes file (see [His tools](#his-tools))
+  - **Morning Check-In**: check in now, which days, from what time
   - **Size**: Small, Medium, Large or Huge
   - **Look**:
     - **Floating** (the default): a light outline with a soft dark halo, so he reads on any wallpaper
@@ -97,6 +98,7 @@ never sends email.
 | Read Gmail | Your claude.ai Gmail connector: search, threads, messages, drafts | Can't send, reply, forward, trash or relabel: those tools are removed |
 | Read Google Calendar | Your claude.ai Google Calendar connector: calendars, events, free time | |
 | Change your calendar, write Gmail drafts | Only after you approve | See below |
+| Remember things about you | Adds a line to his notes | Only after you click **Save it** |
 
 **Changes need your OK.** When you ask for a change ("move my dentist appointment to Friday at 3"),
 he looks things up, then shows a card: *Calendar change: Move "Dentist" from Thu 2:00 PM to Fri 3:00 PM*,
@@ -104,8 +106,18 @@ with **Yes, do it** and **No**. Only **Yes** lets him make that kind of change, 
 (calendar changes, or Gmail drafts, never both). Sending another message cancels a card you haven't answered.
 
 **Notes about you.** Right-click → **What He Knows About You…** opens `~/.desk-buddy/fox-notes.md`.
-Whatever you write there goes along with every question (so to Claude too): your name, your role,
-which calendar is your work one, who "the team" is.
+Whatever's there goes along with every question (so to Claude too): your name, your role, which
+calendar is your work one, who "the team" is. He adds to it himself, with your OK: say "remember that
+I prefer meetings after 10" (or tell him something that's clearly worth keeping) and he shows a
+**Remember** card; **Save it** adds the line. "Forget that I…" works the same way. He never saves a
+note without the card.
+
+**Morning check-in.** On weekdays, the first time you're at your Mac after 8 AM (and before 2 PM), he
+opens his bubble with today's meetings, email that looks like it needs you, yesterday's spending and
+any budget that's over (with Fuchs Bucks connected), and yesterday's steps (with the activity summary).
+It's a fresh chat, so you can ask follow-ups right there. Right-click → **Morning Check-In** for
+**Check In Now**, weekdays or every day or off, and the hour it starts. Each check-in is one chat
+with Claude, so it counts toward your usage like any other.
 
 **Settings** (optional, in `~/.desk-buddy/config.json`):
 
