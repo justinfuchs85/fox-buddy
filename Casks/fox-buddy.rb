@@ -17,12 +17,12 @@ cask "fox-buddy" do
   end
 
   auto_updates true
-  depends_on macos: ">= :monterey"
+  depends_on macos: :monterey
 
   app "Fox Buddy.app"
 
-  uninstall quit:      "com.foxbuddy.app",
-            launchctl: ["com.deskbuddy.bridge", "com.deskbuddy.appwatch"]
+  uninstall launchctl: ["com.deskbuddy.bridge", "com.deskbuddy.appwatch"],
+            quit:      "com.foxbuddy.app"
 
   zap trash: [
     "~/.desk-buddy",
