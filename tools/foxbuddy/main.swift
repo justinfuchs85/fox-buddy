@@ -1140,15 +1140,28 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
     @objc func screensChanged() { clampOnScreen() }
 
+    /// The pointer resting on him for a second wakes him if he's asleep (desk.wake decides; it does nothing
+    /// otherwise), and staying there keeps him up a little longer.
+    var overSince: Date?, lastWakeNudge: Date?
+    func restingOnHim(_ over: Bool) {
+        guard over, !grab.dragging else { overSince = nil; lastWakeNudge = nil; return }
+        let now = Date()
+        guard let since = overSince else { overSince = now; return }
+        if now.timeIntervalSince(since) >= 1, lastWakeNudge.map({ now.timeIntervalSince($0) >= 10 }) ?? true {
+            lastWakeNudge = now; js("desk.wake()")
+        }
+    }
+
     func hover() {
         guard let panel = panel, panel.isVisible, ready else { return }
-        if grab.dragging { panel.ignoresMouseEvents = false; return }
+        if grab.dragging { panel.ignoresMouseEvents = false; restingOnHim(false); return }
         let p = NSEvent.mouseLocation, f = panel.frame
-        guard f.contains(p) else { if !panel.ignoresMouseEvents { panel.ignoresMouseEvents = true }; return }
+        guard f.contains(p) else { if !panel.ignoresMouseEvents { panel.ignoresMouseEvents = true }; restingOnHim(false); return }
         let x = p.x - f.minX, y = f.maxY - p.y
-        web.evaluateJavaScript("desk.hit(\(x), \(y))") { r, _ in
+        web.evaluateJavaScript("desk.hit(\(x), \(y))") { [weak self] r, _ in
             let over = (r as? Bool) ?? true
             if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }
+            self?.restingOnHim(over)
         }
     }
 

@@ -101,8 +101,9 @@
   function setTarget(m) { target = m; if (cur.kind === 'loop') settle(curMood); }
   // You at the Mac (the app says so: desk.present): no deep night sleep while you're using it, he's just idle.
   // asked: what the bridge (or his own offline mode) wants; shown: what he actually plays.
-  let present = false, asked = 'idle';
-  const shown = m => (m === 'night' && present ? 'idle' : m);
+  let present = false, asked = 'idle', wakeUntil = 0;
+  const WAKE_MS = 90 * 1000;                        // after you wake him, he stays up this long (more while you're around)
+  const shown = m => ((m === 'idle' || m === 'night') && millis() < wakeUntil ? 'awake' : m === 'night' && present ? 'idle' : m);
   function want(m) { asked = m; if (shown(m) !== target) setTarget(shown(m)); }
   function setPresent(on) { present = !!on; if (asked === 'night') want('night'); }
 
@@ -212,7 +213,21 @@
     if (cmd === '?') return reply();
     say('err unknown command');
   }
-  function tap() { say('tap'); playEvent('tap'); }   // the bridge decides what a tap means for Claude
+  function tap() { if (wake()) return; say('tap'); playEvent('tap'); }   // the bridge decides what a tap means for Claude
+  // You came over while he's asleep (a click, or the mouse resting on him): he wakes up, yawns, rubs his eyes
+  // and waves, then stays awake a while. Already awake from that: you being there keeps him up a bit longer.
+  function wake() {
+    const now = millis();
+    if (now < wakeUntil) { wakeUntil = now + WAKE_MS; return false; }
+    const asleep = cur.kind === 'loop' && (curMood === 'idle' || curMood === 'night') && target === curMood && !act;
+    if (!asleep || !(L.CLIPS || {})['wake_' + curMood]) return false;
+    present = true; wakeUntil = now + WAKE_MS;
+    const from = curMood;
+    target = 'awake'; pendingEvent = null;
+    startSeq({ kind: 'event', key: 'wake_' + from, from, to: 'awake' });
+    return true;
+  }
+  function wakeCheck(now) { if (wakeUntil && now >= wakeUntil) { wakeUntil = 0; want(asked); } }
 
   // ---------- drawing ----------
   let look = 'float';                 // float: no background, light line, a dark halo so he reads on any wallpaper
@@ -285,7 +300,7 @@
   function frame() {
     rAF(frame);
     const now = millis();
-    runDemo(now); runOffline(now); autoBehaviour(now);
+    runDemo(now); runOffline(now); autoBehaviour(now); wakeCheck(now);
     let frames = seqOf(cur.kind, cur.key);
     let tick = Math.floor(Math.max(0, now - seqStart) * FPS / 1000);
     if (cur.kind !== 'loop' && tick >= frames.length) { settle(cur.to); tick = 0; frames = seqOf(cur.kind, cur.key); }
@@ -339,7 +354,7 @@
   }
 
   window.desk = {
-    line, tap, setLook, said, hit, act: setAct, present: setPresent,
+    line, tap, wake, setLook, said, hit, act: setAct, present: setPresent,
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
     state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, act, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
     // for tests: jump the clock forward

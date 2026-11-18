@@ -287,6 +287,30 @@
   // at night only a soft startle: one eye opens, he grumbles, back to sleep
   const N = firstPose.night;
   CLIPS.tap_startle_night = { home: 'night', seq: seq('startle', smoothFrom(N, beat([[3, { squash: 0.06, earL: 0.1, earR: 0.1 }], [8, { eyes: 'squint', earR: 0, mouth: 'flat' }], [10, { eyes: 'squint', mouth: 'wobble', brows: 'cross' }], [6, { eyes: 'closed', mouth: 'flat' }], [10, {}]], N))) };
+  // wake: you came over while he was dozing (or curled up asleep). His eyes open, a huge yawn and stretch,
+  // he rubs his eyes, blinks, sees you, and waves hello; then he's awake for a while (the 'awake' look-around).
+  const SHUT = mix(STAND, { eyes: 'closed', mouth: 'flat' });
+  const rub = (k) => [4, { eyes: 'closed', mouth: 'wobble', squash: 0.02, earL: -0.05, earR: -0.05,
+    armL: k ? [109, 115] : [114, 110], armR: k ? [142, 115] : [147, 110] }];
+  const WAKE = beat([
+    [8, { eyes: 'squint', mouth: 'flat', earL: 0.12, earR: 0.05 }],                  // one eye's worth of awake
+    [3, { eyes: 'closed', mouth: 'flat' }], [6, { eyes: 'squint', mouth: 'w' }],
+    [6, { eyes: 'closed', mouth: 'o', squash: -0.03, tilt: -0.05 }],                  // here it comes
+    [8, { eyes: 'closed', mouth: 'open', squash: -0.07, tilt: -0.1, hy: -1, armL: [92, 96], armR: [164, 96], perk: 0.92 }],
+    [14, { eyes: 'closed', mouth: 'open', squash: -0.1, tilt: -0.12, hy: -2, armL: [84, 84], armR: [172, 84], earL: 0.25, earR: 0.25, tail: 0.25 }],
+    [5, { eyes: 'closed', mouth: 'w', squash: 0.06, earL: 0.1, earR: 0.1 }],
+    rub(0), rub(1), rub(0), rub(1), rub(0), rub(1),                                   // rubs his eyes
+    [4, { eyes: 'squint', mouth: 'w' }], [3, { eyes: 'closed', mouth: 'w' }],
+    [6, { eyes: 'wide', brows: 'up', perk: 1.06, mouth: 'o' }],                       // oh! it's you
+    [5, { eyes: 'happy', mouth: 'smile', armR: [176, 92], tail: 0.2 }], [5, { eyes: 'happy', mouth: 'open', armR: [186, 104], tail: 0.3 }],
+    [5, { eyes: 'happy', mouth: 'smile', armR: [176, 92], tail: 0.2 }], [5, { eyes: 'happy', mouth: 'open', armR: [186, 104], tail: 0.3 }],
+    [5, { eyes: 'happy', mouth: 'smile', armR: [176, 92], tail: 0.2 }],
+    [10, { eyes: 'dot', mouth: 'w', tail: 0.15 }]]);
+  for (const m of ['idle', 'night']) {
+    CLIPS[`wake_${m}`] = { home: m, seq: seq(`wake_${m}`, [...tween(firstPose[m], SHUT, m === 'night' ? 16 : 10),
+      ...smooth([[SHUT, 3], ...WAKE]), ...tween(WAKE[WAKE.length - 1][0], firstPose.awake, 10)]) };
+  }
+
   // meeting prep: checks a pocket watch, straightens up, nods
   for (const m of MOMENTS) {
     if (m === 'night') continue;
