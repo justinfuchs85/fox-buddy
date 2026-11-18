@@ -2,9 +2,13 @@
 
 <img src="tools/foxbuddy/icon.png" alt="Fox Buddy's icon: a little orange fox" width="160" align="right">
 
-A little fox who lives in a corner of your Mac's screen and keeps an eye on Claude for you,
+A hand-drawn fox who lives in a corner of your Mac's screen and keeps an eye on Claude for you,
 Clippy-style. He works while Claude works, waves when it needs you, celebrates when it finishes,
 and you can chat with him.
+
+**[Get him at justinfuchs85.github.io/fox-buddy](https://justinfuchs85.github.io/fox-buddy/)**: a signed,
+notarized download for Apple silicon and Intel Macs (macOS 12 or later), or `brew install --cask
+justinfuchs85/fox-buddy/fox-buddy`. His chat needs Claude Pro or Max; he installs Claude Code himself.
 
 ## What he does
 
@@ -20,8 +24,16 @@ and you can chat with him.
   only after you click **Yes, do it** on a card showing exactly what he'll do, and never sends email. A
   gate checks every tool call he makes, whatever your own Claude Code settings allow. Bigger jobs go to Claude Desktop with
   **Open in Claude**. Details: [His tools](tools/foxbuddy/README.md#his-tools).
-- **Gags**: click him for one of 14 (pounce, tail chase, zoomies, floss, dab, dubstep and more), or
-  pick one from the right-click menu.
+- **Remembers what you tell him**: "remember that…" saves a note once you OK it, a few questions the
+  first time he opens set his name and how chatty he is, and **What He Knows About You** shows it all in
+  his chat. A **morning check-in** gives you today's meetings and the email that needs you.
+- **Wakes up when you come over**: he dozes when nothing's going on. Click him, or rest your pointer on
+  him for a second, and he yawns, rubs his eyes and waves; while you type in his bubble, he watches.
+- **Gags**: once he's awake, click him for one of 14 (pounce, tail chase, zoomies, floss, dab, dubstep
+  and more), or pick one from the right-click menu.
+- **Keeps himself up to date**: he tells you in his chat when there's a new version, and one click
+  installs it. He handles company networks that inspect traffic, tells you plainly when something's
+  not set up, and **Report a Problem…** opens a GitHub issue showing you exactly what's in it first.
 - **Extras**: goes from orange toward red as you near your Claude usage limits, holds a ringing clock
   before meetings, holds up a letter for a Slack VIP, and sleeps at night. He's silent.
 
