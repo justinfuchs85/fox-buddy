@@ -40,6 +40,15 @@ Accessibility → deskbuddy-appwatch**). Calendar and Slack settings: see the ma
 Using claude.ai in Chrome or Safari instead of the desktop app? Load the extension in
 [`tools/browserwatch`](../browserwatch/README.md) and he reacts to browser chats too.
 
+### On a work Mac
+
+Company networks such as Cloudflare Gateway, Zscaler or Netskope often inspect secure traffic using
+their own certificate. macOS trusts it, but Claude Code doesn't, so his chat would just hang. He
+looks for those certificates in the System keychain, copies them to
+`~/.desk-buddy/company-certificates.pem`, and gives that file to Claude Code
+(`NODE_EXTRA_CA_CERTS`). You don't need to do anything. If the company network blocks Anthropic
+outright, he says so instead of hanging, and IT needs to allow `api.anthropic.com` and `claude.ai`.
+
 ## Using him
 
 - **Click** him to tap him. You get a gag. If Claude needs you, it snoozes the nagging. If

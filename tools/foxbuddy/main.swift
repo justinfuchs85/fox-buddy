@@ -431,6 +431,7 @@ enum Connectors {
         guard let claude = Asker.findClaude() else { return nil }
         let p = Process(), pipe = Pipe()
         p.executableURL = URL(fileURLWithPath: claude); p.arguments = ["mcp", "list"]
+        p.environment = Asker.claudeEnvironment()
         try? FileManager.default.createDirectory(at: Asker.askDir, withIntermediateDirectories: true)
         p.currentDirectoryURL = Asker.askDir
         p.standardOutput = pipe; p.standardError = FileHandle.nullDevice; p.standardInput = FileHandle.nullDevice
@@ -715,6 +716,40 @@ final class Asker {
         }
     }
 
+    /// Company networks (Cloudflare Gateway, Zscaler, Netskope...) inspect secure traffic with their own certificate.
+    /// macOS trusts it, but Claude Code keeps its own list and just retries forever, so he'd never answer. IT installs
+    /// those certificates in the System keychain (Apple's own roots live elsewhere), so copy any we recognize to a
+    /// file and point Claude Code at it. NODE_EXTRA_CA_CERTS only adds to what it trusts.
+    static let corpCA = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/company-certificates.pem")
+    static let CORP_CA_NAMES = ["Cloudflare", "Gateway CA", "Zscaler", "Netskope", "Palo Alto", "Cisco Umbrella", "Forcepoint", "Fortinet"]
+    static var corpCAChecked = false
+
+    static func findCompanyCertificates() -> String? {
+        if !corpCAChecked {
+            corpCAChecked = true
+            var pems = ""
+            for name in CORP_CA_NAMES {
+                let r = Setup.run("/usr/bin/security", ["find-certificate", "-a", "-p", "-c", name, "/Library/Keychains/System.keychain"])
+                if r.status == 0 && r.out.contains("BEGIN CERTIFICATE") && !pems.contains(r.out) { pems += r.out }
+            }
+            let fm = FileManager.default
+            if pems.isEmpty { try? fm.removeItem(at: corpCA) }
+            else {
+                try? fm.createDirectory(at: corpCA.deletingLastPathComponent(), withIntermediateDirectories: true)
+                fm.createFile(atPath: corpCA.path, contents: Data(pems.utf8), attributes: [.posixPermissions: 0o644])
+            }
+        }
+        return FileManager.default.fileExists(atPath: corpCA.path) ? corpCA.path : nil
+    }
+
+    /// The environment every Claude Code run gets.
+    static func claudeEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = (env["PATH"] ?? "/usr/bin:/bin") + ":/opt/homebrew/bin:/usr/local/bin"
+        if env["NODE_EXTRA_CA_CERTS"] == nil, let certs = findCompanyCertificates() { env["NODE_EXTRA_CA_CERTS"] = certs }
+        return env
+    }
+
     func ask(_ question: String, approved: Approval? = nil, done: @escaping (String, Bool) -> Void) {
         cancel()
         guard let claude = claudePath else {
@@ -740,9 +775,7 @@ final class Asker {
         p.arguments = Asker.arguments(session: id, resuming: resuming, setup: setup, readFiles: readFiles,
                                       approved: approved, python: "/usr/bin/python3", tools: tools, gate: gate.path)
         p.currentDirectoryURL = dir
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = (env["PATH"] ?? "/usr/bin:/bin") + ":/opt/homebrew/bin:/usr/local/bin"
-        p.environment = env
+        p.environment = Asker.claudeEnvironment()
         p.standardOutput = out; p.standardError = err; p.standardInput = input   // the question goes in on stdin, never as an argument
         running = p
         DispatchQueue.global().async {
@@ -769,7 +802,11 @@ final class Asker {
                 guard self.running === p else { return }          // cancelled, or a newer question took over
                 self.running = nil
                 // (Claude Code's launcher can turn the stop signal into exit code 143, so go by why we stopped it)
-                if timedOut { done("Claude Code hadn't answered after 3 minutes, so I stopped it. For a big job, use Open in Claude.", false) }
+                if timedOut {
+                    done(problem.isEmpty && text.isEmpty
+                         ? "Claude Code went quiet for 3 minutes without saying anything, so I stopped it. If that keeps happening, this Mac's network is probably blocking or inspecting the connection to Anthropic (common on work Macs), so ask IT to allow api.anthropic.com and claude.ai."
+                         : "Claude Code hadn't answered after 3 minutes, so I stopped it. For a big job, use Open in Claude.", false)
+                }
                 else if p.terminationReason == .uncaughtSignal || p.terminationStatus == 143 { done("Claude Code was stopped before it answered.", false) }
                 else if p.terminationStatus == 0 && !text.isEmpty { self.session = id; done(text, true) }
                 else {
@@ -782,7 +819,9 @@ final class Asker {
                         msg += "\n\nThat conversation is gone, so your next message starts a new one."
                     }
                     if said.lowercased().contains("login") || said.lowercased().contains("api key") || said.lowercased().contains("auth") {
-                        msg = "I'm not signed in to Claude, so I can't answer yet. Right-click me › Setup › Sign In to Claude… and I'll open the sign-in page."
+                        msg = said.lowercased().contains("invalid") || said.contains("401")
+                            ? "My Claude sign-in on this Mac stopped working, so I can't answer. Right-click me › Setup › Sign In to Claude… to sign in again."
+                            : "I'm not signed in to Claude, so I can't answer yet. Right-click me › Setup › Sign In to Claude… and I'll open the sign-in page."
                     }
                     done(msg, false)
                 }
@@ -1273,6 +1312,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         guard let claude = Asker.findClaude() else { installClaude(); return }
         let p = Process(), input = Pipe()
         p.executableURL = URL(fileURLWithPath: claude); p.arguments = ["auth", "login"]
+        p.environment = Asker.claudeEnvironment()
         p.standardInput = input; p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
         p.terminationHandler = { _ in DispatchQueue.main.async { if NSApp.modalWindow != nil { NSApp.abortModal() } } }
         do { try p.run() } catch { _ = alert("Couldn't start signing in", error.localizedDescription); return }
