@@ -43,10 +43,11 @@ Using claude.ai in Chrome or Safari instead of the desktop app? Load the extensi
 ### Updates
 
 Once a day he asks GitHub whether there's a newer release (an anonymous request, with nothing about you
-in it). If there is, he mentions it once in his chat the next time you're at the Mac, with **Download**,
-**What's new** and **Not now**. Download the DMG, drag him into Applications and choose **Replace**:
-your settings, notes and connections stay. **Setup › Check for Updates…** checks right away. A copy
-built from source doesn't check by itself.
+in it). If there is, he mentions it once in his chat the next time you're at the Mac, with **Update**,
+**What's new** and **Not now**. Update installs it with Sparkle (it checks the update is signed with the
+release key), then restarts him; your settings, notes and connections stay. A build without Sparkle offers
+**Download** instead: open the DMG, drag him into Applications and choose **Replace**.
+**Setup › Check for Updates…** checks right away. A copy built from source doesn't check by itself.
 
 ### Which Claude plan
 

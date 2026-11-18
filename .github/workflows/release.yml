@@ -39,9 +39,12 @@ jobs:
       - name: Bridge and tool tests
         run: python3 -m unittest discover -s tests
 
-      - name: Homebrew cask style
+      - name: Homebrew cask check
         continue-on-error: true
-        run: brew style --cask Casks/fox-buddy.rb
+        run: |
+          brew tap justinfuchs85/fox-buddy "$GITHUB_WORKSPACE"
+          brew style justinfuchs85/fox-buddy/fox-buddy
+          brew audit --cask --online justinfuchs85/fox-buddy/fox-buddy
 
       - name: Signing certificate
         if: env.HAS_SIGNING == 'true'

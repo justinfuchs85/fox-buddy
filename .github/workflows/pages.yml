@@ -1,0 +1,40 @@
+# The website (docs/index.html), with the fox's own drawing code copied in so he moves there exactly as he
+# does on your desktop. Publishes to https://justinfuchs85.github.io/fox-buddy/ on each change.
+#
+# One-time setup: repo Settings › Pages › Build and deployment › Source: GitHub Actions.
+name: Website
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "characters/fox/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/fox
+          cp -R docs/. _site/
+          cp characters/fox/fox.js characters/fox/rig.js characters/fox/character.js _site/fox/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

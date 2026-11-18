@@ -27,11 +27,23 @@ and you can chat with him.
 
 ## Get him
 
+**Website:** https://justinfuchs85.github.io/fox-buddy/
+
 **Download (easiest):** grab the latest `.dmg` from the [Releases page](https://github.com/justinfuchs85/fox-buddy/releases),
 open it and drag Fox Buddy to Applications. The first time he opens, he offers to set himself up: a small
 background helper (in `~/.desk-buddy`), Claude Code's hooks, and, if they're missing, Claude Code itself and
 your sign-in to Claude (in your browser; no Terminal). You need a Claude Pro or Max plan. Right-click him ›
 **Setup** to connect Gmail and Calendar, and for the Claude-app watcher, the browser extension and updates.
+
+**Homebrew:**
+
+```bash
+brew tap justinfuchs85/fox-buddy https://github.com/justinfuchs85/fox-buddy
+brew install --cask fox-buddy
+```
+
+**Updates:** he checks once a day and tells you in his chat when there's a new version. Click **Update**
+and he installs it and restarts, keeping your settings.
 
 ## Set him up from the code
 

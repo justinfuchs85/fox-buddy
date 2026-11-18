@@ -32,13 +32,40 @@ You need an Apple Developer Program membership (you're the Account Holder, so yo
 
    Then delete the `.p12` and keep the `.p8` somewhere safe (a password manager), not in the repo.
 
+## Once: the update key (one-click updates)
+
+Sparkle, the updater inside the app, only installs an update signed with your key, so nobody else can push
+one to people's Macs. Make the key on your Mac (it's kept in your login keychain) and give GitHub a copy:
+
+```bash
+mkdir -p /tmp/sparkle && curl -fsSL https://github.com/sparkle-project/Sparkle/releases/download/2.9.4/Sparkle-2.9.4.tar.xz | tar -xJ -C /tmp/sparkle
+/tmp/sparkle/bin/generate_keys                                  # makes the key, prints its public half
+/tmp/sparkle/bin/generate_keys -x ~/Desktop/fox-buddy-update-key.txt
+gh secret set SPARKLE_PRIVATE_KEY -R justinfuchs85/fox-buddy < ~/Desktop/fox-buddy-update-key.txt
+```
+
+Without `gh`: open that file, copy its one line, and paste it as a new secret named `SPARKLE_PRIVATE_KEY`
+(Settings › Secrets and variables › Actions). Save the file in your password manager, then delete it.
+**Don't lose this key:** a release signed with a different one won't install over the old version.
+
+From the next release on, the app has one-click updates, and each release has an `appcast.xml` (the update
+feed Sparkle reads, at `releases/latest/download/appcast.xml`). Until the secret is set, releases build
+without Sparkle, and his update notice offers the DMG instead.
+
+## Once: the website
+
+Settings › Pages › Build and deployment › Source: **GitHub Actions**. After that, any change to `docs/` or the
+fox's drawing code publishes https://justinfuchs85.github.io/fox-buddy/ (the Website workflow).
+
 ## Each release
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
-About 10 minutes later the release is on the Releases page with `Fox-Buddy-1.0.0.dmg` and `.zip`. For a test
+About 10 minutes later the release is on the Releases page with `Fox-Buddy-1.0.0.dmg`, `.zip`, `Fox-Buddy.dmg`
+(the same DMG under a name that never changes, for links) and `appcast.xml`. The workflow then points the
+Homebrew cask (`Casks/fox-buddy.rb`) at the new version, in a commit of its own on `main`. For a test
 build without a release: Actions › Release › Run workflow (the files are on the run's page, under Artifacts).
 
 Mac runners count 10× against GitHub's free Actions minutes on a private repo (2,000 a month on the free plan,
@@ -46,8 +73,7 @@ so about 200 Mac minutes): a release takes roughly 10 to 15 of those.
 
 ## Who can download it
 
-Releases of a private repository are visible only to people with access to it. To share with a friend, add them
-as a collaborator (Settings › Collaborators), or make the repository public.
+Anyone: the repository is public. Point people at https://justinfuchs85.github.io/fox-buddy/.
 
 ## What the download does on a new Mac
 
