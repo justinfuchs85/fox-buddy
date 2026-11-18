@@ -1259,6 +1259,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         setupItems.append(item("Browser Extension for claude.ai…", #selector(showExtension)))
         setupItems.append(.separator())
         setupItems.append(item("Check for Updates…", #selector(checkUpdates)))
+        setupItems.append(item("Report a Problem…", #selector(reportProblem)))
         m.addItem(sub("Setup", setupItems))
         m.addItem(item("Hide (Open Fox Buddy Again to Bring Him Back)", #selector(hideHim)))
         m.addItem(item("Quit Fox Buddy", #selector(quit), key: "q"))
@@ -1353,38 +1354,114 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
     }
 
-    /// `claude auth login` opens the browser to sign in, and finishes by itself when you do. If the page shows a
-    /// code to paste instead, there's a box for it here: no Terminal either way.
+    /// Signing in happens entirely in Claude Code's own sign-in, never in his windows: Anthropic's rule is that
+    /// other apps don't handle Claude sign-in codes or credentials. `claude auth login` opens the browser and
+    /// usually finishes by itself. If the page shows a code to paste instead, Claude Code opens in Terminal
+    /// and you paste it there, into Claude Code itself.
     @objc func signIn() {
         guard let claude = Asker.findClaude() else { installClaude(); return }
-        let p = Process(), input = Pipe()
+        let p = Process()
         p.executableURL = URL(fileURLWithPath: claude); p.arguments = ["auth", "login"]
         p.environment = Asker.claudeEnvironment()
-        p.standardInput = input; p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+        p.standardInput = Pipe(); p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
         p.terminationHandler = { _ in DispatchQueue.main.async { if NSApp.modalWindow != nil { NSApp.abortModal() } } }
         do { try p.run() } catch { _ = alert("Couldn't start signing in", error.localizedDescription); return }
-        let a = NSAlert()
-        a.messageText = "Sign in to Claude"
-        a.informativeText = "A browser window opened for you to sign in to your Claude account. When you finish, this box closes by itself.\n\nIf the page shows a code instead, paste it here and click Done."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        field.placeholderString = "Code (only if the page shows one)"
-        a.accessoryView = field
-        a.addButton(withTitle: "Done"); a.addButton(withTitle: "Cancel")
-        NSApp.activate(ignoringOtherApps: true)
-        let r = a.runModal()
+        let r = alert("Sign in to Claude", """
+        A browser window opened for you to sign in to your Claude account. When you finish, this box closes by itself.
+
+        If the page shows a code to paste instead, click Paste a Code: Claude Code opens in Terminal, and you \
+        paste the code there. (I never see your sign-in.)
+        """, buttons: ["Paste a Code", "Cancel"])
+        if r == .alertFirstButtonReturn { if p.isRunning { p.terminate() }; signInInTerminal(claude); return }
         if r == .alertSecondButtonReturn { if p.isRunning { p.terminate() }; return }
-        if r == .alertFirstButtonReturn && p.isRunning {
-            let code = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !code.isEmpty { input.fileHandleForWriting.write(Data((code + "\n").utf8)) }
-        }
+        signedInCheck(tries: 20)
+    }
+
+    /// Claude Code's own sign-in, in Terminal, for the paste-a-code case. He watches for it to finish.
+    func signInInTerminal(_ claude: String) {
+        Setup.ensureRuntime()
+        let f = Setup.runtime.appendingPathComponent("sign-in.command")
+        let q = { (s: String) in "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        var script = "#!/bin/zsh\nclear\n"
+        if let certs = Asker.findCompanyCertificates() { script += "export NODE_EXTRA_CA_CERTS=\(q(certs))\n" }
+        script += """
+        echo "Signing in to Claude, for Fox Buddy. Finish in your browser; if it shows a code, paste it below."
+        echo
+        \(q(claude)) auth login
+        echo
+        echo "All done: you can close this window."
+
+        """
+        try? script.write(to: f, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: f.path)
+        NSWorkspace.shared.open(f)
+        signedInCheck(tries: 200, every: 3, quietUntilDone: true)
+    }
+
+    /// Poll Claude Code until it's signed in, then say so (or explain a free plan).
+    func signedInCheck(tries: Int, every: Double = 0.25, quietUntilDone: Bool = false) {
         DispatchQueue.global().async {
-            for _ in 0..<40 where p.isRunning { usleep(250_000) }
-            if p.isRunning { p.terminate() }
-            let acct = App.account()
+            var acct = App.account()
+            for _ in 0..<tries where !acct.signedIn { Thread.sleep(forTimeInterval: every); acct = App.account() }
             DispatchQueue.main.async {
                 if acct.signedIn && acct.freePlan { self.warnIfFreePlan(true) }
                 else if acct.signedIn { self.prefs.set(false, forKey: "freePlan"); self.say("Signed in to Claude. Double-click me to chat."); self.checkConnections(quiet: true) }
-                else { _ = self.alert("Not signed in yet", "Signing in didn't finish. Try Setup › Sign In to Claude… again.") }
+                else if !quietUntilDone { _ = self.alert("Not signed in yet", "Signing in didn't finish. Try Setup › Sign In to Claude… again.") }
+            }
+        }
+    }
+
+    // MARK: report a problem
+
+    /// Opens a new GitHub issue with his version, macOS's and Claude Code's, and the end of his log, after
+    /// showing you exactly what goes in it. Your home folder's name is taken out; you can edit it all on GitHub
+    /// before posting, and nothing is sent unless you post it.
+    @objc func reportProblem() {
+        DispatchQueue.global().async {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let tail = { (name: String, n: Int) -> String in
+                let t = (try? String(contentsOf: Setup.runtime.appendingPathComponent(name), encoding: .utf8)) ?? ""
+                return t.split(separator: "\n", omittingEmptySubsequences: false).suffix(n).joined(separator: "\n")
+            }
+            let claudeV = Asker.findClaude().map { Setup.run($0, ["--version"]).out.trimmingCharacters(in: .whitespacesAndNewlines) } ?? "not installed"
+            let acct = App.account()
+            var log = tail("bridge.log", 40) + "\n" + tail("bridge.out", 10)
+            log = log.replacingOccurrences(of: home, with: "~")
+            if log.count > 3500 { log = "…" + String(log.suffix(3500)) }
+            let info = """
+            - Fox Buddy \(App.version)
+            - macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+            - Claude Code \(claudeV), \(acct.signedIn ? (acct.freePlan ? "signed in (free plan)" : "signed in") : "not signed in")
+            - Company network certificate: \(Asker.findCompanyCertificates() != nil ? "found" : "none")
+            """
+            let body = """
+            **What happened, and what you expected:**
+
+
+            **His setup:**
+            \(info)
+
+            <details><summary>The end of his log</summary>
+
+            ```
+            \(log.trimmingCharacters(in: .whitespacesAndNewlines))
+            ```
+            </details>
+            """
+            DispatchQueue.main.async {
+                let r = self.alert("Report a problem", """
+                This opens a new issue on Fox Buddy's GitHub page, filled in with:
+
+                \(info)
+                - the last lines of his log (what he heard from Claude and when; it can include project and folder names, with your home folder's name taken out)
+
+                You can read and change all of it before posting, and nothing is sent unless you post it. Posting needs a free GitHub account.
+                """, buttons: ["Open GitHub", "Show the Log First", "Cancel"])
+                if r == .alertSecondButtonReturn { NSWorkspace.shared.open(Setup.runtime.appendingPathComponent("bridge.log")); return }
+                guard r == .alertFirstButtonReturn else { return }
+                var c = URLComponents(string: "https://github.com/justinfuchs85/fox-buddy/issues/new")!
+                c.queryItems = [URLQueryItem(name: "title", value: ""), URLQueryItem(name: "body", value: body)]
+                if let u = c.url { NSWorkspace.shared.open(u) }
             }
         }
     }

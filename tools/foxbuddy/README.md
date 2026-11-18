@@ -106,9 +106,12 @@ outright, he says so instead of hanging, and IT needs to allow `api.anthropic.co
   - **Open at Login**
   - **Setup**: **Set Up Fox Buddy…** (installs or repairs the bridge and Claude Code's hooks, and installs
     Claude Code and signs you in if needed; the downloaded app offers this the first time it opens),
-    **Sign In to Claude…** (opens the sign-in page in your browser: no Terminal), **Connect Gmail &
+    **Sign In to Claude…** (Claude Code's own sign-in, in your browser; if the page shows a code to paste,
+    Claude Code opens in Terminal for it, so the fox never handles your sign-in), **Connect Gmail &
     Calendar…**, **Check Connections**, **Watch the Claude Desktop App** (the Accessibility helper),
-    **Browser Extension for claude.ai…**, and **Check for Updates…**
+    **Browser Extension for claude.ai…**, **Check for Updates…**, and **Report a Problem…** (a new GitHub
+    issue filled in with his version, Claude Code's and the end of his log: it shows you what's in it first,
+    and nothing is sent unless you post it)
   - **Hide**
   - **Quit**
 - Clicks on the empty space around him go through to whatever is underneath.
