@@ -77,8 +77,10 @@ Using claude.ai in Chrome or Safari instead of the desktop app? Load the extensi
   - **Move to**: a corner
   - **Float Above Windows**: turn it off to keep him on the desktop, behind your windows
   - **Open at Login**
-  - **Setup**: **Set Up Fox Buddy…** (installs or repairs the bridge and Claude Code's hooks; the downloaded app
-    offers this the first time it opens), **Watch the Claude Desktop App** (the Accessibility helper),
+  - **Setup**: **Set Up Fox Buddy…** (installs or repairs the bridge and Claude Code's hooks, and installs
+    Claude Code and signs you in if needed; the downloaded app offers this the first time it opens),
+    **Sign In to Claude…** (opens the sign-in page in your browser: no Terminal), **Connect Gmail &
+    Calendar…**, **Check Connections**, **Watch the Claude Desktop App** (the Accessibility helper),
     **Browser Extension for claude.ai…**, and **Check for Updates…**
   - **Hide**
   - **Quit**
@@ -145,10 +147,11 @@ with Claude, so it counts toward your usage like any other.
 | `fox_activity_dirs` | iCloud Drive's `Shortcuts/Fox Buddy` folder, and `Fox Buddy` at the top of iCloud Drive |
 | `fox_gmail_server`, `fox_calendar_server` | `claude_ai_Gmail`, `claude_ai_Google_Calendar` |
 
-The last two must match what Claude Code calls your connectors. Run `claude mcp list` and look for
-the Gmail and Google Calendar lines: `claude.ai Gmail` becomes `claude_ai_Gmail` (dots and spaces
-turn into `_`). If he says he can't reach Gmail or your calendar, this is the first thing to check.
-The connectors themselves come from claude.ai (Settings → Connectors), not from this app.
+You normally don't need the last two: he finds your Gmail and Google Calendar connectors himself, by asking
+Claude Code (`claude mcp list`) shortly after he starts, every few hours, and when you choose **Setup › Check
+Connections**. If one isn't set up, or needs signing in again, he tells you so in plain words when you ask
+about it, with the fix. The connectors themselves live in your Claude account: **Setup › Connect Gmail &
+Calendar…** opens Claude's connector settings.
 
 **macOS will ask once** whether Fox Buddy may access your Desktop, Documents and Downloads folders
 (and iCloud Drive, for the activity summary). Allow it. Because the app is signed on your Mac rather

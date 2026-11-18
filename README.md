@@ -29,9 +29,9 @@ and you can chat with him.
 
 **Download (easiest):** grab the latest `.dmg` from the [Releases page](https://github.com/justinfuchs85/fox-buddy/releases),
 open it and drag Fox Buddy to Applications. The first time he opens, he offers to set himself up: a small
-background helper (in `~/.desk-buddy`) and Claude Code's hooks. You need [Claude Code](https://claude.com/claude-code),
-signed in, for him to follow Claude and to chat. Right-click him › **Setup** for the Claude-app watcher, the
-browser extension and updates.
+background helper (in `~/.desk-buddy`), Claude Code's hooks, and, if they're missing, Claude Code itself and
+your sign-in to Claude (in your browser; no Terminal). You need a Claude Pro or Max plan. Right-click him ›
+**Setup** to connect Gmail and Calendar, and for the Claude-app watcher, the browser extension and updates.
 
 ## Set him up from the code
 

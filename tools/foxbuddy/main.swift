@@ -274,8 +274,8 @@ enum Setup {
         let hooks = run("/usr/bin/python3", [tools.appendingPathComponent("install_hooks.py").path])
         report.append(hooks.status == 0 ? "✓ Claude Code's hooks are in (your settings.json was backed up first)."
                                         : "✗ Couldn't add Claude Code's hooks: \(hooks.out.prefix(300))")
-        report.append(Asker.findClaude() != nil ? "✓ Claude Code is installed, so you can chat with him."
-                                                : "• To chat with him, install Claude Code (claude.com/claude-code) and sign in.")
+        report.append(Asker.findClaude() != nil ? "✓ Claude Code is installed."
+                                                : "• Claude Code isn't on this Mac yet: next, I'll offer to install it and sign you in.")
         return report
     }
 
@@ -322,6 +322,8 @@ struct FoxSetup {
     var gmail: String
     var calendar: String
     var extras: [ExtraServer] = []
+    var gmailState = "unknown"          // connected, needs-auth, failed, missing, or unknown (never checked)
+    var calendarState = "unknown"
 
     static func load() -> FoxSetup {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -342,6 +344,12 @@ struct FoxSetup {
                                                      "~/Library/Mobile Documents/com~apple~CloudDocs/Fox Buddy"]),
             gmail: name("fox_gmail_server", "claude_ai_Gmail"),
             calendar: name("fox_calendar_server", "claude_ai_Google_Calendar"))
+        if let found = Connectors.load() {              // what `claude mcp list` showed last time (a config name still wins)
+            if cfg["fox_gmail_server"] == nil, let n = found["gmail"]?["name"] { setup.gmail = n }
+            if cfg["fox_calendar_server"] == nil, let n = found["calendar"]?["name"] { setup.calendar = n }
+            setup.gmailState = found["gmail"]?["state"] ?? "missing"
+            setup.calendarState = found["calendar"]?["state"] ?? "missing"
+        }
         setup.extras = ExtraServer.load(home: home, reserved: ["foxbuddy", setup.gmail, setup.calendar])
         return setup
     }
@@ -398,6 +406,67 @@ struct ExtraServer {
     var allowed: [String] { tools.map { "mcp__\(name)__\($0)" } }
 }
 
+/// Which of your claude.ai connectors Claude Code can reach (Gmail, Google Calendar), found with `claude mcp list`
+/// in the background (at launch, every few hours, and from Setup › Check Connections), kept in
+/// ~/.desk-buddy/connectors.json. So he uses their real names, and can tell you plainly when one isn't set up.
+enum Connectors {
+    static let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/connectors.json")
+    static let kinds = ["gmail": "gmail", "calendar": "calendar"]       // kind: a word its name contains
+
+    /// {"gmail": {"name": "claude_ai_Gmail", "state": "connected"}, ...}; a kind that's missing wasn't found.
+    /// nil: never checked (so nothing is assumed).
+    static func load() -> [String: [String: String]]? {
+        guard let d = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file))) as? [String: Any] else { return nil }
+        return d["found"] as? [String: [String: String]] ?? [:]
+    }
+
+    /// Runs `claude mcp list` and records what it shows. Returns nil if Claude Code couldn't be asked.
+    @discardableResult
+    static func check() -> [String: [String: String]]? {
+        guard let claude = Asker.findClaude() else { return nil }
+        let p = Process(), pipe = Pipe()
+        p.executableURL = URL(fileURLWithPath: claude); p.arguments = ["mcp", "list"]
+        try? FileManager.default.createDirectory(at: Asker.askDir, withIntermediateDirectories: true)
+        p.currentDirectoryURL = Asker.askDir
+        p.standardOutput = pipe; p.standardError = FileHandle.nullDevice; p.standardInput = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        let kill = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 90, execute: kill)
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        p.waitUntilExit(); kill.cancel()
+        guard p.terminationStatus == 0 else { return nil }
+        var found: [String: [String: String]] = [:]
+        for line in out.split(separator: "\n").map(String.init) {
+            guard let colon = line.range(of: ": ") else { continue }
+            let label = String(line[..<colon.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let lower = label.lowercased(), rest = line.lowercased()
+            for (kind, word) in kinds where lower.contains(word) && found[kind] == nil {
+                let name = label.replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
+                let state = rest.contains("needs auth") || rest.contains("authenticat") ? "needs-auth"
+                          : rest.contains("✓") || rest.contains("connected") ? "connected"
+                          : rest.contains("✗") || rest.contains("fail") ? "failed" : "connected"
+                found[kind] = ["name": name, "state": state]
+            }
+        }
+        let record: [String: Any] = ["found": found, "checked": ISO8601DateFormatter().string(from: Date())]
+        if let d = try? JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted]) { try? d.write(to: file) }
+        return found
+    }
+
+    /// One line for a person: how Gmail and Calendar stand.
+    static func summary(_ found: [String: [String: String]]) -> String {
+        func say(_ kind: String, _ title: String) -> String {
+            switch found[kind]?["state"] {
+            case "connected": return "✓ \(title) is connected."
+            case "needs-auth": return "• \(title) is added in Claude but needs signing in again (Claude › Settings › Connectors)."
+            case "failed": return "• \(title) is added in Claude but isn't responding right now."
+            default: return "• \(title) isn't set up. Connect it in Claude › Settings › Connectors (Setup › Connect Gmail & Calendar…)."
+            }
+        }
+        return say("gmail", "Gmail") + "\n" + say("calendar", "Google Calendar")
+    }
+}
+
 /// The connector tools he may use. Reading is always allowed; changes only in the one turn after you
 /// approve them in his bubble; the rest are removed from his tool list altogether.
 let GMAIL_READ = ["search_threads", "get_thread", "get_message", "list_labels", "list_drafts", "get_draft"]
@@ -446,7 +515,11 @@ final class Asker {
     var readFiles = false                 // "Files: can open", for this chat only
     func reset() { cancel(); Asker.forget(except: nil); session = nil; readFiles = false }
     var busy: Bool { running != nil }
-    private lazy var claudePath: String? = Asker.findClaude()
+    private var foundClaude: String?
+    private var claudePath: String? {                     // looked for again until it's found (it may be installed later)
+        if foundClaude == nil { foundClaude = Asker.findClaude() }
+        return foundClaude
+    }
     static let askDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/ask")
     static let notesFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/fox-notes.md")
 
@@ -502,8 +575,10 @@ final class Asker {
         \(readFiles ? "The user has switched files to \"can open\" for this chat, so you may also read files in those folders with Read." : "You can see names only, not what's inside files. If you'd need to look inside one, tell the user to click \"Files: names only\" under the chat to let you open files.")
         - Activity: the user's recent steps, workouts and so on, from the foxbuddy activity tool.\(setup.extras.compactMap { $0.about.map { "\n- " + $0 } }.joined())
         - The web: WebSearch.
-        - Gmail: search and read email. Google Calendar: see calendars, events and free time.
+        \(Asker.connectorLine(setup.gmailState, "Gmail", "search and read email", "email"))
+        \(Asker.connectorLine(setup.calendarState, "Google Calendar", "see calendars, events and free time", "the calendar"))
         You can't run commands, and you can't change, move or delete files.
+        If a tool fails or isn't there, never pass on a raw error message: say in one plain sentence what didn't work and what the user can do about it.
 
         Changes need the user's approval, one exact call at a time. You can't change the calendar or write Gmail drafts on your own \
         (those calls are refused), and you never send email. When the user asks for a change, gather what you need and look up the \
@@ -532,6 +607,19 @@ final class Asker {
         }
         if !notes.isEmpty { t += "\n\nWhat the user wants you to know about them (their own notes):\n" + notes }
         return t
+    }
+
+    /// What he's told about a connector, by how it stands: so a question about email gets a friendly
+    /// "that's not set up yet" with the fix, never a raw error.
+    static func connectorLine(_ state: String, _ title: String, _ can: String, _ topic: String) -> String {
+        switch state {
+        case "connected", "unknown":
+            return "- \(title): \(can)."
+        case "needs-auth", "failed":
+            return "- \(title) is added in the user's Claude account but isn't working right now (it needs signing in again). If they ask about \(topic), say so in one friendly line, then the fix: in Claude's Settings › Connectors, reconnect \(title); then right-click you › Setup › Check Connections."
+        default:
+            return "- \(title) isn't set up yet. If they ask about \(topic), say so in one friendly line and offer the fix: right-click you › Setup › Connect Gmail & Calendar… opens Claude's connector settings; after connecting \(title) there, Setup › Check Connections."
+        }
     }
 
     /// Every tool he may use this turn: the same list goes to Claude Code (--allowedTools) and to the gate.
@@ -612,7 +700,7 @@ final class Asker {
     func ask(_ question: String, approved: Approval? = nil, done: @escaping (String, Bool) -> Void) {
         cancel()
         guard let claude = claudePath else {
-            done("I answer questions with Claude Code, and I can't find it on this Mac. Install it (claude.com/claude-code), then ask me again.", false); return
+            done("I answer questions with Claude Code, and it isn't on this Mac yet. Right-click me › Setup › Set Up Fox Buddy… and I'll install it for you.", false); return
         }
         if Asker.hooksDisabled() {
             done("Hooks are switched off in your Claude Code settings (disableAllHooks), and I only chat with my tool gate on. Remove that setting from ~/.claude/settings.json, then ask me again.", false); return
@@ -676,7 +764,7 @@ final class Asker {
                         msg += "\n\nThat conversation is gone, so your next message starts a new one."
                     }
                     if said.lowercased().contains("login") || said.lowercased().contains("api key") || said.lowercased().contains("auth") {
-                        msg += "\n\nTo fix it, open Terminal, run `claude`, and type `/login` to sign in."
+                        msg = "I'm not signed in to Claude, so I can't answer yet. Right-click me › Setup › Sign In to Claude… and I'll open the sign-in page."
                     }
                     done(msg, false)
                 }
@@ -782,6 +870,26 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         // The morning check-in: looked at once a minute.
         let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.checkBrief() }
         RunLoop.main.add(briefTimer, forMode: .common)
+        // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
+        let presence = Timer(timeInterval: 30, repeats: true) { [weak self] _ in self?.checkPresence() }
+        RunLoop.main.add(presence, forMode: .common)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.checkPresence() }
+        // Which connectors Claude Code has: shortly after launch, then every 6 hours.
+        let connectors = Timer(timeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.checkConnections(quiet: true) }
+        RunLoop.main.add(connectors, forMode: .common)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.checkConnections(quiet: true) }
+    }
+
+    static func idleSeconds() -> Double {
+        [CGEventType.mouseMoved, .keyDown, .leftMouseDown, .scrollWheel]
+            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? 1e9
+    }
+    var wasPresent: Bool?
+    func checkPresence() {
+        let here = App.idleSeconds() < 300
+        guard here != wasPresent else { return }
+        wasPresent = here
+        js("desk.present(\(here))")
     }
 
     // MARK: morning check-in
@@ -1057,6 +1165,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         m.addItem(.separator())
         var setupItems: [NSMenuItem] = [item("Set Up Fox Buddy…", #selector(setUp))]
+        setupItems.append(item("Sign In to Claude…", #selector(signIn)))
+        setupItems.append(item("Connect Gmail & Calendar…", #selector(connectGoogle)))
+        setupItems.append(item("Check Connections", #selector(checkConnections)))
         setupItems.append(item("Watch the Claude Desktop App", Setup.watcher == nil ? nil : #selector(toggleWatching), on: Setup.watching))
         setupItems.append(item("Browser Extension for claude.ai…", #selector(showExtension)))
         setupItems.append(.separator())
@@ -1090,8 +1201,109 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     @objc func setUp() {
         DispatchQueue.global().async {
             let report = Setup.install()
-            DispatchQueue.main.async { _ = self.alert("Fox Buddy setup", report.joined(separator: "\n\n")) }
+            DispatchQueue.main.async {
+                _ = self.alert("Fox Buddy setup", report.joined(separator: "\n\n"))
+                self.ensureClaude()
+            }
         }
+    }
+
+    // MARK: Claude Code: installed and signed in, without Terminal
+
+    static func signedIn() -> Bool {
+        guard let claude = Asker.findClaude() else { return false }
+        let r = Setup.run(claude, ["auth", "status", "--json"])
+        let d = (try? JSONSerialization.jsonObject(with: Data(r.out.utf8))) as? [String: Any]
+        return d?["loggedIn"] as? Bool == true
+    }
+
+    /// After setup: offer to install Claude Code if it's missing, then to sign in if he isn't.
+    func ensureClaude() {
+        if Asker.findClaude() == nil { installClaude(); return }
+        DispatchQueue.global().async {
+            let ok = App.signedIn()
+            DispatchQueue.main.async { if !ok { self.signIn() } else { self.checkConnections(quiet: true) } }
+        }
+    }
+
+    func installClaude() {
+        let r = alert("Install Claude Code?", """
+        Fox Buddy chats with you through Claude Code, Anthropic's app for Claude on the command line, and it isn't on \
+        this Mac yet. Install it now? This runs Anthropic's official installer (claude.ai/install.sh), which puts it in \
+        ~/.local/bin. It takes a minute, and you'll need a Claude Pro or Max plan (or a Console account) to use it.
+        """, buttons: ["Install", "Not Now"])
+        guard r == .alertFirstButtonReturn else { return }
+        say("Installing Claude Code… I'll let you know when it's done.")
+        DispatchQueue.global().async {
+            let out = Setup.run("/bin/bash", ["-c", "curl -fsSL https://claude.ai/install.sh | bash"])
+            DispatchQueue.main.async {
+                if Asker.findClaude() != nil { self.signIn() }
+                else { _ = self.alert("Claude Code didn't install", String(out.out.suffix(600))) }
+            }
+        }
+    }
+
+    /// `claude auth login` opens the browser to sign in, and finishes by itself when you do. If the page shows a
+    /// code to paste instead, there's a box for it here: no Terminal either way.
+    @objc func signIn() {
+        guard let claude = Asker.findClaude() else { installClaude(); return }
+        let p = Process(), input = Pipe()
+        p.executableURL = URL(fileURLWithPath: claude); p.arguments = ["auth", "login"]
+        p.standardInput = input; p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+        p.terminationHandler = { _ in DispatchQueue.main.async { if NSApp.modalWindow != nil { NSApp.abortModal() } } }
+        do { try p.run() } catch { _ = alert("Couldn't start signing in", error.localizedDescription); return }
+        let a = NSAlert()
+        a.messageText = "Sign in to Claude"
+        a.informativeText = "A browser window opened for you to sign in to your Claude account. When you finish, this box closes by itself.\n\nIf the page shows a code instead, paste it here and click Done."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.placeholderString = "Code (only if the page shows one)"
+        a.accessoryView = field
+        a.addButton(withTitle: "Done"); a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        let r = a.runModal()
+        if r == .alertSecondButtonReturn { if p.isRunning { p.terminate() }; return }
+        if r == .alertFirstButtonReturn && p.isRunning {
+            let code = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !code.isEmpty { input.fileHandleForWriting.write(Data((code + "\n").utf8)) }
+        }
+        DispatchQueue.global().async {
+            for _ in 0..<40 where p.isRunning { usleep(250_000) }
+            if p.isRunning { p.terminate() }
+            let ok = App.signedIn()
+            DispatchQueue.main.async {
+                if ok { self.say("Signed in to Claude. Double-click me to chat."); self.checkConnections(quiet: true) }
+                else { _ = self.alert("Not signed in yet", "Signing in didn't finish. Try Setup › Sign In to Claude… again.") }
+            }
+        }
+    }
+
+    @objc func connectGoogle() {
+        if let u = URL(string: "https://claude.ai/settings/connectors") { NSWorkspace.shared.open(u) }
+        _ = alert("Connect Gmail & Google Calendar", """
+        Claude's connector settings just opened in your browser. Connect Gmail and Google Calendar there (they're \
+        in Claude's directory of connectors), signed in with the Google account you want him to read.
+
+        Then choose Setup › Check Connections, and he'll pick them up. He only ever reads them, and asks you before \
+        changing your calendar or writing a draft.
+        """)
+    }
+
+    @objc func checkConnections() { checkConnections(quiet: false) }
+    func checkConnections(quiet: Bool) {
+        DispatchQueue.global().async {
+            let found = Connectors.check()
+            DispatchQueue.main.async {
+                guard !quiet else { return }
+                if let f = found { _ = self.alert("Connections", Connectors.summary(f)) }
+                else { _ = self.alert("Connections", "I couldn't ask Claude Code. Is it installed and signed in? (Setup › Sign In to Claude…)") }
+            }
+        }
+    }
+
+    /// A line in his speech bubble.
+    func say(_ text: String) {
+        let d = (try? JSONSerialization.data(withJSONObject: ["text": text, "kind": "info"])) ?? Data()
+        narration(String(data: d, encoding: .utf8) ?? "")
     }
     @objc func toggleWatching() {
         let on = !Setup.watching

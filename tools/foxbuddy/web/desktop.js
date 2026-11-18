@@ -99,6 +99,12 @@
     else startSeq(want);
   }
   function setTarget(m) { target = m; if (cur.kind === 'loop') settle(curMood); }
+  // You at the Mac (the app says so: desk.present): no deep night sleep while you're using it, he's just idle.
+  // asked: what the bridge (or his own offline mode) wants; shown: what he actually plays.
+  let present = false, asked = 'idle';
+  const shown = m => (m === 'night' && present ? 'idle' : m);
+  function want(m) { asked = m; if (shown(m) !== target) setTarget(shown(m)); }
+  function setPresent(on) { present = !!on; if (asked === 'night') want('night'); }
 
   const GAGS = L.GAGS || [];
   let lastGag = -1, lastTapClip = '';
@@ -150,8 +156,8 @@
       offline = true; ovWorking = ovWaiting = ovUnseen = 0; prepMode = false; goal = [...TANGERINE];
     }
     if (!offline || demo) return;
-    const want = nightNow() ? 'night' : 'idle';
-    if (target !== want && !pendingEvent && cur.kind === 'loop') setTarget(want);
+    const own = nightNow() ? 'night' : 'idle';
+    if (shown(own) !== target && !pendingEvent && cur.kind === 'loop') want(own);
   }
   const offlineMark = now => offline && !demo && now > OFFLINE_MARK_AFTER_MS;
 
@@ -180,9 +186,10 @@
       if (arg === 'demo' || arg === 'cycle') { demo = true; demoNext = 0; return reply(); }
       if (!MOODS.includes(arg)) { say('err unknown mood'); return; }
       const selfEscalated = target === 'waiting' || target === 'longhaul';
-      const same = !demo && (arg === target || (selfEscalated && BASE[target] === arg));
+      const same = !demo && (shown(arg) === target || (selfEscalated && BASE[target] === arg));
       demo = false;
-      if (!same) setTarget(arg);
+      asked = arg;
+      if (!same) setTarget(shown(arg));
       return reply();
     }
     if (cmd === 'e') { demo = false; if (!playEvent(arg)) { say('err unknown event'); return; } return reply(); }
@@ -332,7 +339,7 @@
   }
 
   window.desk = {
-    line, tap, setLook, said, hit, act: setAct,
+    line, tap, setLook, said, hit, act: setAct, present: setPresent,
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
     state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, act, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
     // for tests: jump the clock forward
