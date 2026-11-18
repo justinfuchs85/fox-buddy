@@ -155,12 +155,21 @@
     clearTimeout(ttlTimer);
     if (sec > 0) ttlTimer = setTimeout(function tick() { if (hovering) { ttlTimer = setTimeout(tick, 1000); return; } post({ action: 'dismiss' }); }, sec * 1000);
   }
+  // His chat tucks itself away after a minute with nothing from you: no typing, clicking, scrolling or mouse
+  // over it. Not while he's working on an answer (the minute starts when it lands), and not during the welcome.
+  let lastActive = Date.now(), tucked = false;
+  const active = () => { lastActive = Date.now(); };
+  for (const ev of ['mousemove', 'mousedown', 'keydown', 'wheel', 'input']) document.addEventListener(ev, active, true);
+  setInterval(() => {
+    if (tucked || busy || hovering || document.body.dataset.mode !== 'chat') return;
+    if (Date.now() - lastActive >= 60000) { tucked = true; post({ action: 'dismiss' }); }
+  }, 2000);
   $('card').addEventListener('mouseenter', () => hovering = true);
   $('card').addEventListener('mouseleave', () => hovering = false);
   const scrollDown = () => { const t = $('thread'); t.scrollTop = t.scrollHeight; };
 
   function addYou(q) { const d = document.createElement('div'); d.className = 'msg you'; d.textContent = q; $('thread').appendChild(d); }
-  function addFox(html, cls = '') { const d = document.createElement('div'); d.className = 'msg fox ' + cls; d.innerHTML = html; $('thread').appendChild(d); return d; }
+  function addFox(html, cls = '') { lastActive = Date.now(); const d = document.createElement('div'); d.className = 'msg fox ' + cls; d.innerHTML = html; $('thread').appendChild(d); return d; }
   function pending() {
     const d = addFox('<span class="dots"><span></span><span></span><span></span></span><div class="tools"><button class="link">Taking a while? Open in Claude</button></div>', 'pending');
     d.querySelector('button').onclick = () => openInClaude('');
@@ -231,6 +240,7 @@
       W.i = 0; W.a = { name: '', foxName: foxName && foxName !== 'Fox' ? foxName : '', style: 'wit', work: '', brief: brief || 'weekdays' };
       mode('welcome'); wRender();
     },
+    shown() { tucked = false; lastActive = Date.now(); },
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };
   const CALENDAR_TOOLS = ['create_event', 'update_event', 'delete_event', 'respond_to_event'], GMAIL_TOOLS = ['create_draft', 'update_draft'];

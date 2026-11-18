@@ -64,6 +64,8 @@ outright, he says so instead of hanging, and IT needs to allow `api.anthropic.co
 - **Double-click** him to chat. His bubble becomes a little chat window: your messages on the right,
   his replies on the left, each with **Copy**. Follow-ups continue the same conversation until you
   click **New chat**. If you close the bubble while he's thinking, the reply pops it back open.
+  After a minute with nothing from you (no typing, clicking, scrolling or mouse over it), the chat
+  tucks itself away; double-click him to bring it back where you left off.
   What he can do in a chat is under [His tools](#his-tools). Chatting needs Claude Code installed and
   signed in with your claude.ai account, and counts towards your Claude usage.
 

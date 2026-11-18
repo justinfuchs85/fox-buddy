@@ -1523,6 +1523,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
 
     func showBubble(key: Bool) {
+        bubbleJS("bubble.shown()")
         placeBubble()
         if key { bubble.makeKeyAndOrderFront(nil); bubble.makeFirstResponder(bubbleWeb) } else { bubble.orderFrontRegardless() }
     }
