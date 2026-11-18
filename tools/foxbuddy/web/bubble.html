@@ -217,6 +217,13 @@
       scrollDown(); report(); },
     error(text) { dropPending(); setBusy(false); addFox(markdown(text), 'err'); scrollDown(); report(); },
     info(text) { addFox(esc(text), 'err'); scrollDown(); report(); },
+    // "What He Knows About You": his notes about you, right in the chat, with a way to edit them
+    notes(text) {
+      const body = text ? '**What I know about you:**\n\n' + text
+                        : "I don't know anything about you yet. Tell me something with \"Remember that…\" and I'll keep it.";
+      const d = addFox(markdown(body) + '<div class="tools"><button class="link edit">Edit my notes</button></div>');
+      d.querySelector('button.edit').onclick = () => post({ editNotes: true });
+      scrollDown(); report(); },
     brief(text) { window.bubble.reset(); turns.push({ you: 'Morning check-in, please.', fox: '' }); window.bubble.answer(text); },
     stopped(why) { if (!busy) return; dropPending(); setBusy(false); addFox(esc(why || 'Stopped.'), 'err'); report(); },
     welcome(foxName, brief) {
@@ -280,7 +287,7 @@
       placeholder: 'e.g. I manage marketing analytics, and I live in spreadsheets' },
     { q: () => 'Want a morning check-in? Today\'s meetings and email that needs you, the first time you sit down at your Mac.', key: 'brief', choices: [
       ['weekdays', 'Weekdays'], ['daily', 'Every day'], ['off', 'No thanks']] },
-    { html: a => `<h3>All set${a.name ? ', ' + esc(a.name) : ''}!</h3><p>Double-click me any time to chat. Right-click me for everything else, including <strong>What He Knows About You…</strong> if you want to tell me more.</p>`,
+    { html: a => `<h3>All set${a.name ? ', ' + esc(a.name) : ''}!</h3><p>Double-click me any time to chat. Right-click me for everything else, including <strong>What He Knows About You</strong> if you want to tell me more.</p>`,
       next: 'Start chatting', last: true },
   ];
   function wRender() {

@@ -1200,7 +1200,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(item("Ask a Question… (or Double-Click Him)", #selector(askFromMenu)))
         let talk = [("all", "Everything Claude Does"), ("important", "Only When Claude Needs Me or Finishes"), ("off", "Nothing")]
         m.addItem(sub("Speech Bubble", talk.map { item($0.1, #selector(pickNarrate(_:)), on: narrate == $0.0, rep: $0.0) }))
-        m.addItem(item("What He Knows About You…", #selector(editNotes)))
+        m.addItem(item("What He Knows About You", #selector(editNotes)))
         let days = [("weekdays", "Weekdays"), ("daily", "Every Day"), ("off", "Off")]
         let hours = [7, 8, 9, 10]
         var briefItems: [NSMenuItem] = [item("Check In Now", #selector(runBrief)), NSMenuItem.separator()]
@@ -1590,6 +1590,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if let path = body["reveal"] as? String { reveal(path) }
         if body.keys.contains("welcome") { finishWelcome(body["welcome"] as? [String: Any]) }
         if body["newChat"] as? Bool == true { asker.reset() }
+        if body["editNotes"] as? Bool == true { openNotesFile() }
         if let q = body["open"] as? String, !q.isEmpty {
             asker.cancel()                                // any reply still on its way: Claude Desktop has it now
             bubbleJS("bubble.stopped('Carried on in Claude Desktop.')")
@@ -1641,7 +1642,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let f = Asker.notesFile
         var text = (try? String(contentsOf: f, encoding: .utf8)) ?? "# What the fox knows about you\n\n"
         if text.contains("- " + line + "\n") || text.hasSuffix("- " + line) { return "Already in my notes." }
-        if text.utf8.count > 5800 { return "My notes are full (they go along with every question). Right-click → What He Knows About You… to trim them." }
+        if text.utf8.count > 5800 { return "My notes are full (they go along with every question). Right-click → What He Knows About You › Edit my notes to trim them." }
         if !text.hasSuffix("\n") { text += "\n" }
         text += "- " + line + "\n"
         do { try text.write(to: f, atomically: true, encoding: .utf8)
@@ -1662,7 +1663,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             if !removed && !bare.isEmpty && bare == target { removed = true; return false }
             return true
         }
-        guard removed else { return "I couldn't find that exact note. Right-click → What He Knows About You… to edit them by hand." }
+        guard removed else { return "I couldn't find that exact note. Right-click → What He Knows About You › Edit my notes to change them by hand." }
         do { try kept.joined(separator: "\n").write(to: f, atomically: true, encoding: .utf8) }
         catch { return "Couldn't change my notes: \(error.localizedDescription)" }
         return "Forgotten: \(target)"
@@ -1718,22 +1719,39 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: f.path)
     }
 
-    /// His notes about you: a plain file you edit, added to what he's told before every chat.
+    static let NOTES_STARTER = """
+    # What the fox knows about you
+
+    Anything here goes along with every question you ask him (and so to Claude). Keep it to what helps,
+    and leave out anything you wouldn't paste into a chat. For example:
+
+    - My name is ...
+    - I work at ... as ...
+    - My work calendar is the one called ...
+    - When I say "the team", I mean ...
+
+    """
+
+    /// "What He Knows About You": his notes, shown in his chat (with a button to edit the file).
     @objc func editNotes() {
+        let raw = ((try? String(contentsOf: Asker.notesFile, encoding: .utf8)) ?? "")
+            .replacingOccurrences(of: App.NOTES_STARTER.replacingOccurrences(of: "# What the fox knows about you\n", with: ""), with: "")
+        let text = raw.replacingOccurrences(of: "<!--[\\s\\S]*?-->", with: "", options: .regularExpression)
+            .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            .filter { !$0.hasPrefix("# What the fox knows about you") }
+            .joined(separator: "\n").replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        bubbleMode = "chat"; bubbleJump = nil
+        bubbleJS("bubble.chat(false)")
+        bubbleJS("bubble.notes(\(jsonLiteral(text)))")
+        showBubble(key: true)
+    }
+
+    /// His notes about you: a plain file you edit, added to what he's told before every chat.
+    @objc func openNotesFile() {
         let f = Asker.notesFile
         if !FileManager.default.fileExists(atPath: f.path) {
-            let starter = """
-            # What the fox knows about you
-
-            Anything here goes along with every question you ask him (and so to Claude). Keep it to what helps,
-            and leave out anything you wouldn't paste into a chat. For example:
-
-            - My name is ...
-            - I work at ... as ...
-            - My work calendar is the one called ...
-            - When I say "the team", I mean ...
-
-            """
+            let starter = App.NOTES_STARTER
             try? starter.write(to: f, atomically: true, encoding: .utf8)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: f.path)
         }

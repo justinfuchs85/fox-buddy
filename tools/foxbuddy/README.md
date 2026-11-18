@@ -83,7 +83,7 @@ outright, he says so instead of hanging, and IT needs to allow `api.anthropic.co
 - **Right-click** for:
   - **Gags** and **Clips**: play any of them on demand
   - **Show Off**: cycles through every mood
-  - **What He Knows About You…**: opens his notes file (see [His tools](#his-tools))
+  - **What He Knows About You**: shows his notes about you in his chat, with an **Edit my notes** button (see [His tools](#his-tools))
   - **Morning Check-In**: check in now, which days, from what time
   - **Size**: Small, Medium, Large or Huge
   - **Look**:
@@ -146,7 +146,7 @@ call you, what you'd like to call him, how chatty he should be (just the facts, 
 anything about your work, and whether you'd like the morning check-in. Your name and work go in his notes
 (in a block of their own); the rest are settings. **Setup › Introduce Yourselves Again…** runs it again.
 
-**Notes about you.** Right-click → **What He Knows About You…** opens `~/.desk-buddy/fox-notes.md`.
+**Notes about you.** Right-click → **What He Knows About You** shows them in his chat; **Edit my notes** opens `~/.desk-buddy/fox-notes.md`.
 Whatever's there goes along with every question (so to Claude too): your name, your role, which
 calendar is your work one, who "the team" is. He adds to it himself, with your OK: say "remember that
 I prefer meetings after 10" (or tell him something that's clearly worth keeping) and he shows a
