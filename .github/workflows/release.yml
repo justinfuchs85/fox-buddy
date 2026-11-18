@@ -41,11 +41,15 @@ jobs:
 
       - name: Homebrew cask check
         continue-on-error: true
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
         run: |
           brew tap justinfuchs85/fox-buddy "$GITHUB_WORKSPACE"
           brew trust --cask justinfuchs85/fox-buddy/fox-buddy      # Homebrew 6 only loads third-party casks you trust
           brew style justinfuchs85/fox-buddy/fox-buddy
           brew audit --cask --online justinfuchs85/fox-buddy/fox-buddy
+          brew install --cask justinfuchs85/fox-buddy/fox-buddy && ls -d "/Applications/Fox Buddy.app"
+          brew uninstall --cask justinfuchs85/fox-buddy/fox-buddy
 
       - name: Signing certificate
         if: env.HAS_SIGNING == 'true'
