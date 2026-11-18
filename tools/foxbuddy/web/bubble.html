@@ -74,6 +74,22 @@
   .confirm .args summary { cursor: pointer; font-weight: 600; }
   .confirm .args div { word-break: break-word; margin-top: 3px; }
   .confirm .args .k { font-weight: 600; color: var(--ink); }
+  /* the welcome: a few questions the first time */
+  #welcome { padding: 4px 0 0; min-width: 300px; }
+  #welcome h3 { margin: 0 0 6px; font-size: 16px; }
+  #welcome p { margin: 0 0 8px; }
+  #welcome .q { font-weight: 600; margin: 0 0 10px; padding-right: 16px; }
+  #welcome input, #welcome textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: inherit; color: var(--ink); background: transparent; outline: none; }
+  #welcome input:focus, #welcome textarea:focus { border-color: var(--accent); }
+  #welcome .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  #welcome .choices { display: flex; flex-direction: column; gap: 6px; }
+  #welcome .choice { text-align: left; border: 1px solid var(--line); border-radius: 10px; background: none; padding: 8px 10px; font: inherit; color: var(--ink); cursor: pointer; }
+  #welcome .choice small { display: block; color: var(--muted); font-size: 12px; }
+  #welcome .choice.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  #welcome .row { margin-top: 12px; }
+  #wDots { display: flex; gap: 5px; justify-content: center; margin-top: 10px; }
+  #wDots span { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+  #wDots span.on { background: var(--accent); }
   [hidden] { display: none !important; }
 </style></head>
 <body>
@@ -81,6 +97,16 @@
   <div id="card">
     <button id="close" title="Close">×</button>
     <div id="say"><div id="text"></div><div class="actions" id="sayActions" hidden><button class="act primary" id="jump">Show me</button></div></div>
+    <div id="welcome" hidden>
+      <div id="wStep"></div>
+      <div class="row">
+        <button class="link" id="wBack">Back</button>
+        <span class="spacer"></span>
+        <button class="link" id="wSkip">Skip</button>
+        <button class="act primary" id="wNext">Next</button>
+      </div>
+      <div id="wDots"></div>
+    </div>
     <div id="chat" hidden>
       <div id="thread"></div>
       <div id="composer">
@@ -122,7 +148,7 @@
     return out.join('');
   }
 
-  function mode(m) { $('say').hidden = m !== 'say'; $('chat').hidden = m !== 'chat'; document.body.dataset.mode = m; report(); }
+  function mode(m) { for (const k of ['say', 'chat', 'welcome']) $(k).hidden = m !== k; document.body.dataset.mode = m; report(); }
   function report() { requestAnimationFrame(() => { const r = $('wrap').getBoundingClientRect(); post({ size: { w: Math.ceil(r.width), h: Math.ceil(r.height) } }); }); }
   new ResizeObserver(report).observe($('wrap'));
   function timeout(sec) {
@@ -193,6 +219,11 @@
     info(text) { addFox(esc(text), 'err'); scrollDown(); report(); },
     brief(text) { window.bubble.reset(); turns.push({ you: 'Morning check-in, please.', fox: '' }); window.bubble.answer(text); },
     stopped(why) { if (!busy) return; dropPending(); setBusy(false); addFox(esc(why || 'Stopped.'), 'err'); report(); },
+    welcome(foxName, brief) {
+      clearTimeout(ttlTimer); $('card').className = '';
+      W.i = 0; W.a = { name: '', foxName: foxName && foxName !== 'Fox' ? foxName : '', style: 'wit', work: '', brief: brief || 'weekdays' };
+      mode('welcome'); wRender();
+    },
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };
   const CALENDAR_TOOLS = ['create_event', 'update_event', 'delete_event', 'respond_to_event'], GMAIL_TOOLS = ['create_draft', 'update_draft'];
@@ -233,6 +264,61 @@
   }
   function settle(card, why) { card.classList.remove('live'); card.classList.add('settled'); const r = card.querySelector('.result'); r.textContent = why; r.hidden = false; report(); }
   function settleAll(why) { document.querySelectorAll('.confirm.live').forEach(c => settle(c, why)); }
+  // ---------- the welcome: a few quick questions the first time (answers go to the app in one message) ----------
+  const W = { i: 0, a: {} };
+  const STEPS = [
+    { html: () => '<h3>Hi there!</h3><p>I\'m the fox in your corner. I keep an eye on Claude for you, and I can help with your files, email and calendar.</p><p>A few quick questions so I can be <em>your</em> fox?</p>',
+      next: "Let's go", skip: 'Maybe later', first: true },
+    { q: () => 'First things first: what should I call you?', input: 'name', placeholder: 'Your first name' },
+    { q: a => `Nice to meet you${a.name ? ', ' + a.name : ''}! And what would you like to call me?`, input: 'foxName', placeholder: 'Fox',
+      chips: ['Fox', 'Rusty', 'Ember', 'Biscuit', 'Scout'] },
+    { q: () => 'How chatty should I be?', key: 'style', choices: [
+      ['facts', 'Just the facts', 'Short and to the point.'],
+      ['wit', 'A little wit', 'Helpful, with the odd dry one-liner.'],
+      ['comedian', 'Full comedian', 'The answer first, then the jokes come out.']] },
+    { q: () => 'Anything I should know about what you do? (Optional: it helps me help.)', input: 'work', multiline: true,
+      placeholder: 'e.g. I manage marketing analytics, and I live in spreadsheets' },
+    { q: () => 'Want a morning check-in? Today\'s meetings and email that needs you, the first time you sit down at your Mac.', key: 'brief', choices: [
+      ['weekdays', 'Weekdays'], ['daily', 'Every day'], ['off', 'No thanks']] },
+    { html: a => `<h3>All set${a.name ? ', ' + esc(a.name) : ''}!</h3><p>Double-click me any time to chat. Right-click me for everything else, including <strong>What He Knows About You…</strong> if you want to tell me more.</p>`,
+      next: 'Start chatting', last: true },
+  ];
+  function wRender() {
+    const st = STEPS[W.i], a = W.a, box = $('wStep');
+    let h = st.html ? st.html(a) : `<div class="q">${esc(st.q(a))}</div>`;
+    if (st.input) h += st.multiline ? `<textarea id="wIn" rows="3" placeholder="${esc(st.placeholder)}"></textarea>` : `<input id="wIn" placeholder="${esc(st.placeholder)}" maxlength="60">`;
+    if (st.chips) h += '<div class="chips">' + st.chips.map(c => `<button class="chip" data-v="${esc(c)}">${esc(c)}</button>`).join('') + '</div>';
+    if (st.choices) h += '<div class="choices">' + st.choices.map(([v, t, d]) => `<button class="choice${a[st.key] === v ? ' on' : ''}" data-v="${esc(v)}">${esc(t)}${d ? `<small>${esc(d)}</small>` : ''}</button>`).join('') + '</div>';
+    box.innerHTML = h;
+    const inp = $('wIn');
+    if (inp) { inp.value = a[st.input] || ''; setTimeout(() => inp.focus(), 30);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); wGo(1); } }); }
+    box.querySelectorAll('.chip').forEach(c => c.onclick = () => { inp.value = c.dataset.v; inp.focus(); });
+    box.querySelectorAll('.choice').forEach(c => c.onclick = () => { a[st.key] = c.dataset.v; wGo(1); });
+    $('wNext').textContent = st.next || 'Next';
+    $('wNext').hidden = !!st.choices;                       // a choice moves on by itself
+    $('wSkip').textContent = st.skip || 'Skip';
+    $('wSkip').hidden = !!(st.last || (st.choices && !st.first));
+    $('wBack').hidden = !!(st.first || st.last);
+    $('wDots').innerHTML = STEPS.map((_, i) => `<span class="${i === W.i ? 'on' : ''}"></span>`).join('');
+    report();
+  }
+  function wKeep() { const st = STEPS[W.i], inp = $('wIn'); if (st.input && inp) W.a[st.input] = inp.value.trim().slice(0, st.multiline ? 300 : 60); }
+  function wGo(d) {
+    const st = STEPS[W.i];
+    if (d > 0 && st.last) { post({ welcome: W.a }); return; }
+    if (d > 0) wKeep();
+    W.i = Math.max(0, Math.min(STEPS.length - 1, W.i + d)); wRender();
+  }
+  $('wNext').onclick = () => wGo(1);
+  $('wBack').onclick = () => { wKeep(); wGo(-1); };
+  $('wSkip').onclick = () => {
+    const st = STEPS[W.i];
+    if (st.first) { post({ welcome: null }); return; }    // "Maybe later"
+    if (st.input) W.a[st.input] = '';
+    W.i = Math.min(STEPS.length - 1, W.i + 1); wRender();
+  };
+
   function setFiles(on) { readFiles = on; $('files').classList.toggle('on', on); $('files').textContent = on ? 'Files: can open' : 'Files: names only'; }
   $('files').onclick = () => { setFiles(!readFiles); post({ readFiles }); };
   $('close').onclick = () => post({ action: 'dismiss' });

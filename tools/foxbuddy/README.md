@@ -125,6 +125,11 @@ cards say the draft is saved, not sent.
 changed argument (a guest slipped in, say) and a second try. Sending another message cancels a card you
 haven't answered.
 
+**Getting acquainted.** The first time he runs (after setup), his bubble asks a few quick questions: what to
+call you, what you'd like to call him, how chatty he should be (just the facts, a little wit, or full comedian),
+anything about your work, and whether you'd like the morning check-in. Your name and work go in his notes
+(in a block of their own); the rest are settings. **Setup › Introduce Yourselves Again…** runs it again.
+
 **Notes about you.** Right-click → **What He Knows About You…** opens `~/.desk-buddy/fox-notes.md`.
 Whatever's there goes along with every question (so to Claude too): your name, your role, which
 calendar is your work one, who "the team" is. He adds to it himself, with your OK: say "remember that

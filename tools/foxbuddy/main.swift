@@ -322,6 +322,8 @@ struct FoxSetup {
     var gmail: String
     var calendar: String
     var extras: [ExtraServer] = []
+    var foxName = "Fox"                 // what you call him, from the welcome (Setup › Introduce Yourselves Again…)
+    var style = "wit"                   // facts | wit | comedian
     var gmailState = "unknown"          // connected, needs-auth, failed, missing, or unknown (never checked)
     var calendarState = "unknown"
 
@@ -351,6 +353,9 @@ struct FoxSetup {
             setup.calendarState = found["calendar"]?["state"] ?? "missing"
         }
         setup.extras = ExtraServer.load(home: home, reserved: ["foxbuddy", setup.gmail, setup.calendar])
+        let prefs = UserDefaults.standard
+        if let n = prefs.string(forKey: "foxName"), !n.isEmpty { setup.foxName = n }
+        if let st = prefs.string(forKey: "style"), ["facts", "wit", "comedian"].contains(st) { setup.style = st }
         return setup
     }
 
@@ -559,15 +564,11 @@ final class Asker {
         notes = String(notes.prefix(6000)).trimmingCharacters(in: .whitespacesAndNewlines)
         let folders = setup.folders.isEmpty ? "(none allowed)" : setup.folders.joined(separator: ", ")
         var t = """
-        You are the fox: a small desktop assistant, a cartoon fox in a corner of the user's Mac, chatting in a speech bubble. \
+        You are \(setup.foxName == "Fox" ? "the fox" : setup.foxName + ", a fox"): a small desktop assistant, a cartoon fox in a corner of the user's Mac, chatting in a speech bubble. \
         Keep replies short and conversational: a few sentences or a short list, under 150 words, unless they ask for more. \
         It is now \(f.string(from: Date())).
 
-        Your personality: lighthearted, witty and sharp. Think quick, clever and warm: a dry one-liner, a playful turn of phrase, \
-        the occasional fox joke, never forced and never more than one per reply. You're on the user's side: tease the situation, \
-        never the user, and skip snark, sarcasm with an edge, cynicism and put-downs. The answer comes first and the facts stay exact: \
-        the wit rides along, it never replaces or blurs the substance. Read the room: when something is stressful or serious \
-        (money worries, bad news in an email, a deadline slipping), drop the jokes and just be clear and kind.
+        \(Asker.personality(setup.style))
 
         What you can use:
         - Files: find files and folders by name with the foxbuddy find_files tool, in \(folders). When you mention a file, \
@@ -607,6 +608,23 @@ final class Asker {
         }
         if !notes.isEmpty { t += "\n\nWhat the user wants you to know about them (their own notes):\n" + notes }
         return t
+    }
+
+    /// How chatty he is (the user picked it in the welcome). Always on the user's side, answer first, kind when it's serious.
+    static func personality(_ style: String) -> String {
+        let core = "You're on the user's side: tease the situation, never the user, and skip snark, sarcasm with an edge, cynicism and put-downs. " +
+            "The answer comes first and the facts stay exact. Read the room: when something is stressful or serious " +
+            "(money worries, bad news in an email, a deadline slipping), drop the jokes and just be clear and kind."
+        switch style {
+        case "facts":
+            return "Your personality: warm but brisk. The user asked for just the facts: answer plainly and briefly, no jokes or asides. " + core
+        case "comedian":
+            return "Your personality: a born entertainer: playful, quick and silly in a good way. Puns, fox jokes and a running bit are welcome, " +
+                "a couple per reply, after the answer. " + core
+        default:
+            return "Your personality: lighthearted, witty and sharp. Think quick, clever and warm: a dry one-liner, a playful turn of phrase, " +
+                "the occasional fox joke, never forced and never more than one per reply. " + core
+        }
     }
 
     /// What he's told about a connector, by how it stands: so a question about email gets a friendly
@@ -809,7 +827,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     var bubbleReady = false
     var bubbleQueue: [String] = []
     var bubbleSize = NSSize(width: 324, height: 90)
-    var bubbleMode = "none"             // none | say (a line about Claude) | chat (talking with him)
+    var bubbleMode = "none"             // none | say (a line about Claude) | chat (talking with him) | welcome (first-time questions)
     var bubbleJump: [String: Any]?
     var bubbleKind = ""                 // what the bubble is saying now: working | needs | done | info
     var bubblePlaced = ""
@@ -853,6 +871,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         self.webDir = webDir
         DispatchQueue.global().async { Asker.forget(except: nil); Asker.clearGates() }   // last time's chats and gate files
         DispatchQueue.global().async { Setup.refreshBridge() }                           // an updated app brings its bridge along
+        if Setup.installed && !prefs.bool(forKey: "welcomed") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.startWelcome() }   // the first time: get acquainted
+        }
         if !Setup.installed && Bundle.main.url(forResource: "support", withExtension: nil) != nil && !prefs.bool(forKey: "setupOffered") {
             prefs.set(true, forKey: "setupOffered")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.offerSetup() }
@@ -906,7 +927,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// Once a day, from briefHour until 2 PM, the first time you're at the Mac (some input in the last two
     /// minutes) and he isn't in the middle of a chat with you.
     func checkBrief() {
-        guard bubble != nil, briefDays != "off", !hiddenByUser, !asker.busy, bubbleMode != "chat" || !bubble.isVisible else { return }
+        guard bubble != nil, briefDays != "off", !hiddenByUser, !asker.busy, bubbleMode != "welcome", prefs.bool(forKey: "welcomed"),
+              bubbleMode != "chat" || !bubble.isVisible else { return }
         let now = Date(), cal = Calendar.current
         let hour = cal.component(.hour, from: now), weekday = cal.component(.weekday, from: now)
         guard hour >= briefHour, hour < 14 else { return }
@@ -1166,6 +1188,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(.separator())
         var setupItems: [NSMenuItem] = [item("Set Up Fox Buddy…", #selector(setUp))]
         setupItems.append(item("Sign In to Claude…", #selector(signIn)))
+        setupItems.append(item("Introduce Yourselves Again…", #selector(startWelcome)))
         setupItems.append(item("Connect Gmail & Calendar…", #selector(connectGoogle)))
         setupItems.append(item("Check Connections", #selector(checkConnectionsNow)))
         setupItems.append(item("Watch the Claude Desktop App", Setup.watcher == nil ? nil : #selector(toggleWatching), on: Setup.watching))
@@ -1204,6 +1227,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             DispatchQueue.main.async {
                 _ = self.alert("Fox Buddy setup", report.joined(separator: "\n\n"))
                 self.ensureClaude()
+                if !self.prefs.bool(forKey: "welcomed") { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.startWelcome() } }
             }
         }
     }
@@ -1416,7 +1440,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             if bubbleMode == "say" && bubbleKind == "needs" { hideBubble() }      // Claude's moving again: that's been dealt with
             return
         }
-        if bubbleMode == "chat" || hiddenByUser || bubble == nil { return }   // you're talking with him: don't interrupt
+        if bubbleMode == "chat" || bubbleMode == "welcome" || hiddenByUser || bubble == nil { return }   // you're talking with him: don't interrupt
         bubbleJump = n["jump"] as? [String: Any]
         bubbleKind = kind
         bubbleMode = "say"
@@ -1473,7 +1497,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         if let action = body["action"] as? String {
             if action == "jump" { jump(bubbleJump) }
-            if action == "dismiss" || action == "jump" { hideBubble() }
+            if action == "dismiss" || action == "jump" {
+                if bubbleMode == "welcome" { prefs.set(true, forKey: "welcomed") }   // (Setup › Introduce Yourselves Again… brings it back)
+                hideBubble()
+            }
         }
         if let q = body["ask"] as? String, !q.isEmpty {
             let question = String(q.prefix(4000))
@@ -1495,6 +1522,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         if let on = body["readFiles"] as? Bool { asker.readFiles = on }
         if let path = body["reveal"] as? String { reveal(path) }
+        if body.keys.contains("welcome") { finishWelcome(body["welcome"] as? [String: Any]) }
         if body["newChat"] as? Bool == true { asker.reset() }
         if let q = body["open"] as? String, !q.isEmpty {
             asker.cancel()                                // any reply still on its way: Claude Desktop has it now
@@ -1572,6 +1600,56 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         do { try kept.joined(separator: "\n").write(to: f, atomically: true, encoding: .utf8) }
         catch { return "Couldn't change my notes: \(error.localizedDescription)" }
         return "Forgotten: \(target)"
+    }
+
+    // MARK: the welcome: a few questions the first time, in his bubble
+
+    @objc func startWelcome() {
+        guard bubble != nil else { return }
+        hiddenByUser = false
+        bubbleMode = "welcome"; bubbleJump = nil
+        bubbleJS("bubble.welcome(\(jsonLiteral(prefs.string(forKey: "foxName") ?? "")), \(jsonLiteral(briefDays)))")
+        showBubble(key: true)
+    }
+
+    /// The answers (nil: "Maybe later"). Your name and work go in his notes, in a block of their own that a
+    /// second welcome replaces; his name, how chatty he is and the morning check-in are settings.
+    func finishWelcome(_ a: [String: Any]?) {
+        prefs.set(true, forKey: "welcomed")
+        guard let a = a else { hideBubble(); return }
+        func clean(_ k: String, _ max: Int) -> String {
+            String(((a[k] as? String) ?? "").replacingOccurrences(of: "[\\r\\n]+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces).prefix(max))
+        }
+        let name = clean("name", 40), fox = clean("foxName", 30), work = clean("work", 300)
+        prefs.set(fox.isEmpty ? "Fox" : fox, forKey: "foxName")
+        if let st = a["style"] as? String, ["facts", "wit", "comedian"].contains(st) { prefs.set(st, forKey: "style") }
+        if let b = a["brief"] as? String, ["weekdays", "daily", "off"].contains(b) { briefDays = b }
+        var lines: [String] = []
+        if !name.isEmpty { lines.append("- Their name is \(name); call them \(name).") }
+        if !work.isEmpty { lines.append("- About their work: \(work)") }
+        writeWelcomeNotes(lines)
+        // straight into a chat with him
+        bubbleMode = "chat"
+        bubbleJS("bubble.reset()"); bubbleJS("bubble.chat(true)")
+        showBubble(key: true)
+    }
+
+    func writeWelcomeNotes(_ lines: [String]) {
+        let f = Asker.notesFile, start = "<!-- from the welcome -->", end = "<!-- /from the welcome -->"
+        var text = (try? String(contentsOf: f, encoding: .utf8)) ?? "# What the fox knows about you\n\n"
+        if let a = text.range(of: start), let b = text.range(of: end, range: a.upperBound..<text.endIndex) {
+            var cut = b.upperBound
+            if cut < text.endIndex, text[cut] == "\n" { cut = text.index(after: cut) }
+            text.removeSubrange(a.lowerBound..<cut)
+        }
+        if !lines.isEmpty {
+            let block = ([start] + lines + [end]).joined(separator: "\n") + "\n"
+            if let h = text.range(of: "\n\n"), text.hasPrefix("# ") { text.insert(contentsOf: block + "\n", at: h.upperBound) }
+            else { text = block + "\n" + text }
+        }
+        try? text.write(to: f, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: f.path)
     }
 
     /// His notes about you: a plain file you edit, added to what he's told before every chat.
