@@ -10,17 +10,24 @@ You need an Apple Developer Program membership (you're the Account Holder, so yo
 1. **Developer ID Application certificate.** Xcode › Settings › Accounts › your team › Manage Certificates ›
    **+** › Developer ID Application. Then in Keychain Access, find "Developer ID Application: …", right-click ›
    Export, save as `fox-buddy.p12` with a password.
-2. **A notarization key.** [App Store Connect](https://appstoreconnect.apple.com) › Users and Access ›
-   Integrations › App Store Connect API › Team Keys › **+**, access "Developer". Download the `.p8` (you can only
-   download it once), and note its **Key ID** and the **Issuer ID** shown above the list.
+2. **Notarizing.** The simplest way: an **app-specific password** for your Apple ID. At
+   [account.apple.com](https://account.apple.com) › Sign-In and Security › App-Specific Passwords › **+**,
+   name it "Fox Buddy notarizing", and copy the password it shows (once).
+
+   (Or an App Store Connect API key: App Store Connect › Users and Access › Integrations › App Store Connect API
+   › Team Keys › **+**, access "Developer". Integrations only appears for the team's Account Holder or an Admin,
+   and the Account Holder must click Request Access there first. Use its secrets below instead.)
 3. **Add them to the repo** (Terminal, in your fox-buddy folder; `gh` asks for each value it doesn't get piped):
 
    ```bash
    base64 -i fox-buddy.p12 | gh secret set MACOS_CERT_P12
    gh secret set MACOS_CERT_PASSWORD          # the .p12's password
-   gh secret set NOTARY_KEY_P8 < AuthKey_XXXXXXXXXX.p8
-   gh secret set NOTARY_KEY_ID                # e.g. XXXXXXXXXX
-   gh secret set NOTARY_ISSUER_ID             # a UUID
+   # notarizing with your Apple ID:
+   gh secret set NOTARY_APPLE_ID              # the Apple ID of your developer account
+   gh secret set NOTARY_PASSWORD              # the app-specific password
+   gh secret set NOTARY_TEAM_ID               # your Team ID: the code in brackets in "Developer ID Application: … (XXXXXXXXXX)"
+   # ...or with an API key instead:
+   # gh secret set NOTARY_KEY_P8 < AuthKey_XXXXXXXXXX.p8; gh secret set NOTARY_KEY_ID; gh secret set NOTARY_ISSUER_ID
    ```
 
    Then delete the `.p12` and keep the `.p8` somewhere safe (a password manager), not in the repo.
