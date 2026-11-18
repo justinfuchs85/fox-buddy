@@ -227,6 +227,27 @@ def command_clip(cmd, worked, payload):
 # line each and sends them to the desktop app only ("n <json>": the board has no bubble). Nothing here is
 # logged: a line can include a command or the start of Claude's reply.
 QUICK_ASK_DIR = os.path.join(HOME, "ask")          # Fox Buddy's quick questions run here: never narrated
+FOX_TOOLS = os.path.join(HOME, "fox-tools.json")    # his extra tools; an entry's "act" is the work act he plays with it
+_fox_acts = {"mtime": None, "acts": {}}
+
+
+def fox_acts():
+    """{server name: act} from fox-tools.json (re-read when it changes)."""
+    try:
+        m = os.path.getmtime(FOX_TOOLS)
+    except OSError:
+        return {}
+    if m != _fox_acts["mtime"]:
+        acts = {}
+        try:
+            for name, d in (json.load(open(FOX_TOOLS)).get("servers") or {}).items():
+                act = isinstance(d, dict) and d.get("act")
+                if isinstance(act, str) and re.fullmatch(r"[a-z]{1,20}", act) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+                    acts[name] = act
+        except (OSError, ValueError, AttributeError):
+            pass
+        _fox_acts.update(mtime=m, acts=acts)
+    return _fox_acts["acts"]
 APP_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]{2,100}")
 CLAUDE_APP_ID = "com.anthropic.claudefordesktop"
 
@@ -931,11 +952,14 @@ class Buddy:
                 state = "done"
             elif ev == "SessionEnd":
                 self.sessions.pop(sid, None)
-            # The fox's own chat looking things up in Fuchs Bucks: he works as the accountant until it's done.
+            # The fox's own chat using one of his extra tools that has an "act" (fox-tools.json): he plays that
+            # work act until the chat's turn is done.
             act_line = None
             if os.path.realpath(s.get("cwd") or "/") == os.path.realpath(QUICK_ASK_DIR):
-                if ev == "PreToolUse" and str(p.get("tool_name") or "").endswith("__finances") and not s.get("act"):
-                    s["act"] = True; act_line = "a accountant"
+                m = re.match(r"mcp__([A-Za-z0-9_-]+)__", str(p.get("tool_name") or ""))
+                act = fox_acts().get(m.group(1)) if m and ev == "PreToolUse" else None
+                if act and s.get("act") != act:
+                    s["act"] = act; act_line = "a " + act
                 elif ev in ("Stop", "StopFailure", "SessionEnd") and s.pop("act", None):
                     act_line = "a -"
             prev = s.get("state")

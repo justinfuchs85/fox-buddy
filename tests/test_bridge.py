@@ -856,17 +856,22 @@ class NarrationTest(BridgeTest):
         self.assertEqual(lines[1]["text"], "shop: Claude needs your permission to use Bash")
         self.assertEqual(lines[2]["jump"], {"app": "com.apple.Terminal"})
 
-    def test_money_lookups_make_him_the_accountant(self):
+    def test_an_extra_tools_act(self):
+        with open(bridge.FOX_TOOLS, "w") as f:
+            json.dump({"servers": {"ledger": {"command": "/usr/bin/true", "tools": ["finances"], "act": "accountant"},
+                                   "recipes": {"command": "/usr/bin/true", "tools": ["search"]}}}, f)
+        self.addCleanup(os.remove, bridge.FOX_TOOLS)
         q = {"session_id": "q", "cwd": bridge.QUICK_ASK_DIR}
         self.b.hook({**q, "hook_event_name": "UserPromptSubmit"})
         self.b.hook({**q, "hook_event_name": "PreToolUse", "tool_name": "mcp__foxbuddy__find_files"})
-        self.b.hook({**q, "hook_event_name": "PreToolUse", "tool_name": "mcp__foxbuddy__finances"})
-        self.b.hook({**q, "hook_event_name": "PreToolUse", "tool_name": "mcp__foxbuddy__finances"})
+        self.b.hook({**q, "hook_event_name": "PreToolUse", "tool_name": "mcp__recipes__search"})
+        self.b.hook({**q, "hook_event_name": "PreToolUse", "tool_name": "mcp__ledger__finances"})
+        self.b.hook({**q, "hook_event_name": "PreToolUse", "tool_name": "mcp__ledger__finances"})
         self.b.hook({**q, "hook_event_name": "Stop"})
         self.assertEqual([c for c in self.b.dev.sent if c.startswith("a ")], ["a accountant", "a -"])
         # someone else's session calling a tool with that name doesn't count
         self.b.dev.sent.clear()
-        self.b.hook({"session_id": "x", "cwd": "/p/shop", "hook_event_name": "PreToolUse", "tool_name": "mcp__foxbuddy__finances"})
+        self.b.hook({"session_id": "x", "cwd": "/p/shop", "hook_event_name": "PreToolUse", "tool_name": "mcp__ledger__finances"})
         self.assertEqual([c for c in self.b.dev.sent if c.startswith("a ")], [])
 
     def test_quick_questions_are_not_narrated(self):

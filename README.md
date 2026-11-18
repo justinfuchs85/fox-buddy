@@ -16,7 +16,7 @@ and you can chat with him.
   **Show me** brings that session forward: the terminal, the browser tab or the Claude app.
 - **Chats and helps**: double-click him to ask a question. He can find files by name in Desktop,
   Documents and Downloads (and open them if you let him), read your Gmail and Google Calendar, search
-  the web, check your iPhone activity summary, and answer money questions from Fuchs Bucks. He changes your calendar or writes a Gmail draft
+  the web, check your iPhone activity summary, and use tools of your own that you plug in. He changes your calendar or writes a Gmail draft
   only after you click **Yes, do it** on a card showing exactly what he'll do, and never sends email. A
   gate checks every tool call he makes, whatever your own Claude Code settings allow. Bigger jobs go to Claude Desktop with
   **Open in Claude**. Details: [His tools](tools/foxbuddy/README.md#his-tools).
