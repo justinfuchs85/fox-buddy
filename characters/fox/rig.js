@@ -205,17 +205,41 @@
     drawMouth(c, P.mouth, nz[0], nz[1] + 6, seed + 430);
 
     if (tailInFront) drawTail();
-    // props he holds go under his paws, so the paws grip them
-    if (raw.front) raw.front(c, { T, H, eL, eR, nose: nz, face: fc }, seed, tick);
-    // paws, in front of everything but props: a short furry arm from the shoulder, a dark mitten of a paw
+    // Arms go behind what he's holding and his paws in front of it, so he reaches over a machine and grips
+    // a clock instead of his arms tangling with it. An arm is a short furry tube from the shoulder (its
+    // outline starts a little way out, so no seam runs across his chest), ending in a dark mitten of a paw.
+    const arms = [];
     for (const side of ['L', 'R']) {
       const hand = side === 'L' ? P.armL : P.armR;
       if (!hand) continue;
       const sh = T([side === 'L' ? 108 : 148, 160]), hp = [hand[0] + P.x, hand[1] + P.y];
-      const dx = hp[0] - sh[0], dy = hp[1] - sh[1], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len, nx = -uy * 9, ny = ux * 9;
-      const arm = [[sh[0] + nx - ux * 4, sh[1] + ny - uy * 4], [hp[0] + nx * 0.85, hp[1] + ny * 0.85], [hp[0] - nx * 0.85, hp[1] - ny * 0.85], [sh[0] - nx - ux * 4, sh[1] - ny - uy * 4]];
-      part(c, arm, F.tint, seed + (side === 'L' ? 500 : 510), { width: 3.6 });
-      part(c, oval(hp[0] + ux * 2, hp[1] + uy * 2, 10.5, 9, 12, Math.atan2(dy, dx)), DARK, seed + (side === 'L' ? 520 : 530), { width: 3.4 });
+      const dx = hp[0] - sh[0], dy = hp[1] - sh[1], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+      arms.push({ side, sh, hp, ux, uy, len, s: seed + (side === 'L' ? 500 : 510) });
+    }
+    for (const A of arms) {
+      const { sh, hp, ux, uy, len, s } = A, w0 = 8.5, w1 = 7.5, nx = -uy, ny = ux;
+      const at = (d, w) => [sh[0] + ux * d + nx * w, sh[1] + uy * d + ny * w];
+      const tube = [at(-6, w0), at(len, w1), at(len + 4, 0), at(len, -w1), at(-6, -w0)];
+      part(c, tube, F.tint, s, { line: false, offX: 1.5, offY: 1 });
+      const from = Math.min(9, len * 0.4);
+      stroke(c, [at(from, w0 - 0.4), at(len * 0.6, w0 - 0.6), at(len, w1)], s + 1, 3.6, F.ink());
+      stroke(c, [at(from, -w0 + 0.4), at(len * 0.6, -w0 + 0.6), at(len, -w1)], s + 2, 3.6, F.ink());
+    }
+    if (raw.front) raw.front(c, { T, H, eL, eR, nose: nz, face: fc }, seed, tick);
+    for (const A of arms) {
+      const { hp, ux, uy, s } = A, ang = Math.atan2(uy, ux), cx = hp[0] + ux * 3, cy = hp[1] + uy * 3;
+      // a mitten: rounder at the toes than at the wrist
+      const mit = [];
+      for (let i = 0; i < 12; i++) {
+        const a = i / 12 * Math.PI * 2, front = Math.cos(a) > 0, rx = front ? 11 : 9, ry = front ? 9.5 : 8.5;
+        mit.push([cx + Math.cos(a) * rx * Math.cos(ang) - Math.sin(a) * ry * Math.sin(ang), cy + Math.cos(a) * rx * Math.sin(ang) + Math.sin(a) * ry * Math.cos(ang)]);
+      }
+      part(c, mit, DARK, s + 20, { width: 3.4, offX: 1.5, offY: 1, wobble: 0.7 });
+      // two toe creases at the tip
+      for (const k of [-1, 1]) {
+        const bx = cx + ux * 7 + -uy * k * 3.6, by = cy + uy * 7 + ux * k * 3.6;
+        stroke(c, [[bx, by], [bx - ux * 4.5, by - uy * 4.5]], s + 30 + k, 1.8, 'rgba(255,241,220,.55)');
+      }
     }
   }
 

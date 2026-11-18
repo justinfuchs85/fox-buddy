@@ -296,36 +296,60 @@
 
   // ---------- props and marks ----------
   const PROPS = {
+    // Props share his look: the same outline (colour and weight), fills printed a little off-register,
+    // a few bold details, and a steadier wobble than his fur so they read as hard objects.
     adder(c, P, a, seed) {
-      const x = 128 + (P.x || 0), y = 201;
-      // the paper tape: up out of the machine, over the top, and down again as it grows
-      const L = (P.tape || 0) * 80, x0 = x - 8, y0 = y - 27, tp = [[x0, y0]];
+      const x = 128 + (P.x || 0), y = 201, PW = { width: 3.6, wobble: 0.55 };
+      // the paper roll at the back, and the tape: up out of it, over the top, and down again as it grows
+      part(c, oval(x - 8, y - 33, 12, 6, 12), CREAM, seed + 804, { ...PW, width: 3 });
+      const L = (P.tape || 0) * 80, x0 = x - 8, y0 = y - 36, tp = [[x0, y0]];
       for (let s = 3; s <= L; s += 3) {
         if (s <= 34) tp.push([x0, y0 - s]);
         else if (s <= 78) { const th = (s - 34) / 44 * Math.PI; tp.push([x0 - 14 + Math.cos(th) * 14, y0 - 34 - Math.sin(th) * 14]); }
         else tp.push([x0 - 28, Math.min(y0 - 34 + (s - 78), 196)]);
       }
-      if (tp.length > 1) { trace(c, tp, false); c.lineCap = 'butt'; c.strokeStyle = INK; c.lineWidth = 11; c.stroke(); c.strokeStyle = CREAM; c.lineWidth = 7; c.stroke(); c.lineCap = 'round'; }
-      if (P.pileTape) for (let k = 0; k < 4; k++) { c.beginPath(); c.ellipse(62 + k * 9, 194 - (k % 2) * 3, 13, 5, 0.25 * k, 0, Math.PI * 2); c.strokeStyle = INK; c.lineWidth = 7; c.stroke(); c.strokeStyle = CREAM; c.lineWidth = 4; c.stroke(); }
-      part(c, [[x - 34, y], [x + 34, y], [x + 30, y - 28], [x - 30, y - 28]], '#8A8F9C', seed + 800, { width: 3.4 });
-      for (let r = 0; r < 2; r++) for (let k = 0; k < 4; k++) dot(c, x - 16 + k * 10, y - 19 + r * 9, 2.6, CREAM);
-      const cr = P.crank || 0, hx = x + 42, hy = y - 24 + cr * 20;                 // the crank on the side
-      stroke(c, [[x + 30, y - 14], [hx, hy]], seed + 801, 3.4, ink()); dot(c, hx, hy, 4.5, '#E8454B');
+      if (tp.length > 1) { trace(c, wob(tp, seed + 805, 0.4), false); c.lineCap = 'butt'; c.strokeStyle = ink(); c.lineWidth = 12; c.stroke(); c.strokeStyle = CREAM; c.lineWidth = 7; c.stroke(); c.lineCap = 'round';
+        for (let k = 1; k * 9 < Math.min(L, 30); k++) stroke(c, [[x0 - 2, y0 - k * 9], [x0 + 2, y0 - k * 9]], seed + 806 + k, 1.4, '#9A8F80'); }
+      if (P.pileTape) for (let k = 0; k < 4; k++) { c.beginPath(); c.ellipse(62 + k * 9, 194 - (k % 2) * 3, 13, 5, 0.25 * k, 0, Math.PI * 2); c.strokeStyle = ink(); c.lineWidth = 7; c.stroke(); c.strokeStyle = CREAM; c.lineWidth = 4; c.stroke(); }
+      // the crank on the right side: a hub, an arm, a red knob
+      const cr = P.crank || 0, hx = x + 46, hy = y - 22 + cr * 18;
+      stroke(c, [[x + 36, y - 16], [hx, hy]], seed + 801, 4.2, ink()); part(c, oval(hx, hy, 5, 5, 8), '#E8454B', seed + 807, { width: 2.6, wobble: 0.3 });
+      // the body: a front face and a sloped key deck, one solid shape
+      part(c, [[x - 37, y + 1, 1], [x + 37, y + 1, 1], [x + 37, y - 15, 1], [x + 30, y - 31, 1], [x - 30, y - 31, 1], [x - 37, y - 15, 1]], '#5E8B76', seed + 800, PW);
+      stroke(c, [[x - 35, y - 15], [x + 35, y - 15]], seed + 808, 2.4, ink());
+      // keys: two rows of square keys on the deck, a big red total key, and a little window on the front
+      for (let r = 0; r < 2; r++) for (let k = 0; k < 4; k++) {
+        const kx = x - 22 + k * (r ? 11 : 10) - (r ? 2 : 0), ky = y - 26 + r * 6;
+        c.fillStyle = CREAM; c.beginPath(); c.roundRect(kx, ky, 7, 4.5, 1.5); c.fill();
+      }
+      c.fillStyle = '#E8454B'; c.beginPath(); c.roundRect(x + 21, y - 27, 9, 10, 2.5); c.fill();
+      part(c, [[x - 20, y - 4], [x + 20, y - 4], [x + 20, y - 11], [x - 20, y - 11]], '#22302A', seed + 809, { width: 2, wobble: 0.3, offX: 0, offY: 0 });
+      for (let k = 0; k < 4; k++) dot(c, x - 12 + k * 8, y - 7.5, 1.6, '#9BE7B0');
       if (P.strip) {                                                              // the torn-off strip, held up to read
         const s0 = P.armR ? [(P.armR[0] + (P.armL ? P.armL[0] : P.armR[0] - 40)) / 2, P.armR[1] - 6] : [128, 112];
-        part(c, [[s0[0] - 24, s0[1] - 6], [s0[0] + 24, s0[1] - 6], [s0[0] + 24, s0[1] + 6], [s0[0] - 24, s0[1] + 6]], CREAM, seed + 802, { width: 2.4, lineColour: INK });
-        for (let k = 0; k < 4; k++) stroke(c, [[s0[0] - 18 + k * 10, s0[1]], [s0[0] - 12 + k * 10, s0[1]]], seed + 803 + k, 1.6, '#888');
+        part(c, [[s0[0] - 26, s0[1] - 6], [s0[0] + 26, s0[1] - 7], [s0[0] + 25, s0[1] + 6], [s0[0] - 25, s0[1] + 7]], CREAM, seed + 802, { width: 2.4, lineColour: INK, wobble: 0.4 });
+        for (let k = 0; k < 4; k++) stroke(c, [[s0[0] - 19 + k * 10, s0[1]], [s0[0] - 13 + k * 10, s0[1]]], seed + 803 + k, 1.6, '#888');
       }
     },
     typewriter(c, P, a, seed) {
-      const x = 128 + (P.x || 0), y = 201, sh = -(P.carriage || 0) * 14;
-      const ph = 12 + (P.page || 0) * 52, top = y - 34 - ph;                       // the page rises out of the roller
-      part(c, [[x + sh - 24, y - 34], [x + sh + 24, y - 34], [x + sh + 24, top], [x + sh - 24, top]], CREAM, seed + 820, { width: 2.6, lineColour: INK, wobble: 0.5 });
-      for (let k = 0; k < Math.floor((P.page || 0) * 7); k++) { const ly = top + 8 + k * 7; if (ly < y - 38) stroke(c, [[x + sh - 18, ly], [x + sh + 14 - (k % 3) * 6, ly]], seed + 821 + k, 1.6, '#8A8A8A'); }
-      part(c, [[x + sh - 40, y - 40], [x + sh + 40, y - 40], [x + sh + 40, y - 31], [x + sh - 40, y - 31]], '#2B2F38', seed + 830, { width: 3 });
-      stroke(c, [[x + sh - 40, y - 36], [x + sh - 52, y - 48]], seed + 831, 3.2, ink()); dot(c, x + sh - 53, y - 49, 4.2, '#E8454B');
-      part(c, [[x - 42, y], [x + 42, y], [x + 36, y - 30], [x - 36, y - 30]], '#3E4452', seed + 832, { width: 3.4 });
-      for (let r = 0; r < 3; r++) for (let k = 0; k < 6 - r; k++) dot(c, x - 25 + r * 5 + k * 10, y - 22 + r * 7, 2.6, CREAM);
+      const x = 128 + (P.x || 0), y = 201, sh = -(P.carriage || 0) * 14, PW = { width: 3.6, wobble: 0.55 };
+      const ry = y - 37;                                                          // the roller's height
+      const ph = 12 + (P.page || 0) * 52, top = ry - ph;                          // the page rises out of the roller
+      part(c, [[x + sh - 22, ry, 1], [x + sh + 22, ry, 1], [x + sh + 22, top, 1], [x + sh - 22, top, 1]], CREAM, seed + 820, { width: 2.6, lineColour: INK, wobble: 0.4 });
+      for (let k = 0; k < Math.floor((P.page || 0) * 7); k++) { const ly = top + 8 + k * 7; if (ly < ry - 6) stroke(c, [[x + sh - 16, ly], [x + sh + 12 - (k % 3) * 6, ly]], seed + 821 + k, 1.6, '#8A8A8A'); }
+      // the carriage: a roller with a knob at each end, and the return lever off the left knob
+      part(c, [[x + sh - 36, ry - 5], [x + sh + 36, ry - 5], [x + sh + 36, ry + 5], [x + sh - 36, ry + 5]], '#2B2F38', seed + 830, { ...PW, width: 3.2 });
+      for (const e of [-1, 1]) part(c, oval(x + sh + e * 41, ry, 5.5, 6.5, 10), '#C9C2B4', seed + 833 + e, { width: 2.8, wobble: 0.3 });
+      stroke(c, [[x + sh - 44, ry - 4], [x + sh - 55, ry - 15]], seed + 831, 3.4, ink()); part(c, oval(x + sh - 56, ry - 16, 4.5, 4.5, 8), '#E8454B', seed + 836, { width: 2.4, wobble: 0.3 });
+      // the body: a low base with a sloped keyboard, one solid shape
+      part(c, [[x - 43, y + 1, 1], [x + 43, y + 1, 1], [x + 43, y - 9, 1], [x + 34, y - 31, 1], [x - 34, y - 31, 1], [x - 43, y - 9, 1]], '#3E4452', seed + 832, PW);
+      stroke(c, [[x - 41, y - 9], [x + 41, y - 9]], seed + 837, 2.2, ink());
+      // three rows of round keys, smaller toward the back, and the space bar on the front
+      for (let r = 0; r < 3; r++) {
+        const n = 7 - (r === 2 ? 1 : 0), gap = 8.4 + r * 1.2, kr = 2.4 + r * 0.35, ky = y - 27 + r * 6;
+        for (let k = 0; k < n; k++) { const kx = x - (n - 1) * gap / 2 + k * gap; dot(c, kx, ky, kr + 0.9, INK); dot(c, kx, ky - 0.4, kr, CREAM); }
+      }
+      c.fillStyle = CREAM; c.beginPath(); c.roundRect(x - 18, y - 6.5, 36, 4, 2); c.fill();
       if (P.ball && !(P.toss > 0)) crumple(c, x, 146, seed);
       if (P.toss > 0 && P.toss < 1) { const t = P.toss; crumple(c, 172 + t * 72, 96 - t * 112 + t * t * 30, seed); }
       for (let k = 0; k < (P.balls || 0); k++) crumple(c, 56 + (k % 3) * 14, 193 - Math.floor(k / 3) * 13, seed + k);
@@ -336,7 +360,7 @@
         c.save(); c.translate(fx, fy); c.rotate(rot);
         trace(c, shape, true); c.fillStyle = 'rgba(200,230,255,.22)'; c.fill();
         c.save(); trace(c, shape, true); c.clip(); c.fillStyle = colour; c.fillRect(-20, 2 - level * 30, 40, level * 30 + 4); c.restore();
-        part(c, shape, null, seed + 840 + k, { width: 3, wobble: 0.4 });
+        part(c, shape, null, seed + 840 + k, { width: 3.6, wobble: 0.4 });
         c.restore();
       };
       const p = P.pour || 0, boil = P.boil || 0, shake = boil > 0.9 ? (tick % 2 ? 1.5 : -1.5) : 0;
@@ -368,9 +392,11 @@
     },
     letter(c, P, a, seed) {
       const x = 128 + (P.x || 0), y = (P.armL ? P.armL[1] - 2 : 172) + (P.y || 0);      // held out in front of him
-      part(c, [[x - 30, y - 18], [x + 30, y - 18], [x + 30, y + 18], [x - 30, y + 18]], '#BFE0FF', seed + 650, { width: 3.4, lineColour: ink() });
-      stroke(c, [[x - 28, y - 16], [x, y + 3], [x + 28, y - 16]], seed + 651, 2.6);
-      part(c, oval(x, y + 3, 6, 6, 10), '#E8454B', seed + 652, { width: 2.2 });
+      part(c, [[x - 30, y - 18, 1], [x + 30, y - 18, 1], [x + 30, y + 18, 1], [x - 30, y + 18, 1]], CREAM, seed + 650, { width: 3.6, wobble: 0.5 });
+      stroke(c, [[x - 28, y - 16], [x, y + 2], [x + 28, y - 16]], seed + 651, 2.6, INK);          // the flap
+      stroke(c, [[x - 28, y + 16], [x - 9, y + 1]], seed + 653, 1.8, '#B8AC98'); stroke(c, [[x + 28, y + 16], [x + 9, y + 1]], seed + 654, 1.8, '#B8AC98');
+      part(c, oval(x, y + 3, 6.5, 6.5, 10), '#E8454B', seed + 652, { width: 2.2, lineColour: INK, wobble: 0.3 });   // a wax seal
+      stroke(c, [[x - 2.5, y + 3], [x + 2.5, y + 3]], seed + 655, 1.6, '#FFB3B5');
     },
     moon(c, P, a, seed) {
       c.save(); c.beginPath(); c.arc(48, 46, 18, 0, Math.PI * 2); c.fillStyle = '#FFE9A8'; c.fill();
