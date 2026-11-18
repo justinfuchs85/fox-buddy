@@ -43,6 +43,7 @@ jobs:
         continue-on-error: true
         run: |
           brew tap justinfuchs85/fox-buddy "$GITHUB_WORKSPACE"
+          brew trust --cask justinfuchs85/fox-buddy/fox-buddy      # Homebrew 6 only loads third-party casks you trust
           brew style justinfuchs85/fox-buddy/fox-buddy
           brew audit --cask --online justinfuchs85/fox-buddy/fox-buddy
 
@@ -192,7 +193,7 @@ jobs:
       - name: Homebrew cask
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          # Point Casks/fox-buddy.rb at this release, so  brew install --cask fox-buddy  gets it.
+          # Point Casks/fox-buddy.rb at this release, so  brew install --cask justinfuchs85/fox-buddy/fox-buddy  gets it.
           SHA="$(shasum -a 256 "out/Fox-Buddy-$VERSION.dmg" | cut -d' ' -f1)"
           git fetch -q origin main && git checkout -q -B main origin/main
           sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/fox-buddy.rb

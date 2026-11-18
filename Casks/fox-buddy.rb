@@ -1,7 +1,7 @@
 # Homebrew cask for Fox Buddy. The release workflow updates version and sha256 with each release.
 #
 #   brew tap justinfuchs85/fox-buddy https://github.com/justinfuchs85/fox-buddy
-#   brew install --cask fox-buddy
+#   brew install --cask justinfuchs85/fox-buddy/fox-buddy
 cask "fox-buddy" do
   version "1.0.2"
   sha256 "8d6f6cf3bd761faa6274bc6ac9e4f23f284b76eb6f28ee743c3c5d48835afffb"

@@ -39,8 +39,10 @@ your sign-in to Claude (in your browser; no Terminal). You need a Claude Pro or 
 
 ```bash
 brew tap justinfuchs85/fox-buddy https://github.com/justinfuchs85/fox-buddy
-brew install --cask fox-buddy
+brew install --cask justinfuchs85/fox-buddy/fox-buddy
 ```
+
+(The full name tells Homebrew 6 you trust this one cask; it doesn't install from third-party taps otherwise.)
 
 **Updates:** he checks once a day and tells you in his chat when there's a new version. Click **Update**
 and he installs it and restarts, keeping your settings.
