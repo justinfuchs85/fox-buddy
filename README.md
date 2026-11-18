@@ -65,19 +65,6 @@ More on the app, the menu and the chat: [`tools/foxbuddy/README.md`](tools/foxbu
 
 To update later: `git pull && zsh tools/foxbuddy/build.sh`.
 
-## Calendar and Slack
-
-The bridge picks up changes to `~/.desk-buddy/config.json` as you make them.
-
-| Setting | What it does |
-|---|---|
-| `calendar_ics` | A private iCal URL. He holds up a ringing clock over the 10 minutes before a meeting. |
-| `my_email` | Lets the calendar skip meetings you've declined. |
-| `slack_token` | A Slack user token (`xoxp-…`) from your own Slack app. The read-only scopes are `im:read`, `im:history`, `mpim:read`, `mpim:history`, `users:read` and `search:read`. |
-| `slack_vips` | Names as they appear in Slack. He holds up a letter while a DM from one of them is unread. |
-
-For a second Claude Code profile, run `python3 tools/install_hooks.py --config-dir ~/.claude-work`.
-
 ## What's in here
 
 | Path | What it is |
