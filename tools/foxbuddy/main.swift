@@ -931,7 +931,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         hoverTimer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in self?.hover() }
         RunLoop.main.add(hoverTimer!, forMode: .common)
         // The morning check-in: looked at once a minute.
-        let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.checkBrief() }
+        let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.checkBrief(); self?.checkForUpdate() }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
         let presence = Timer(timeInterval: 30, repeats: true) { [weak self] _ in self?.checkPresence() }
@@ -1427,10 +1427,76 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         It sends the fox status labels like "Stop response", never your messages.
         """)
     }
+    // MARK: updates
+    // Once a day he asks GitHub for the latest release (an anonymous request: no account, nothing about you).
+    // If it's newer than him, he mentions it in his chat the next time you're at the Mac, with a Download button.
+
+    static var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0" }
+    static let LATEST_RELEASE = URL(string: "https://api.github.com/repos/justinfuchs85/fox-buddy/releases/latest")!
+    struct Release { let version: String; let download: URL; let page: URL }
+    var updateOffer: Release?
+
+    /// "1.0.10" is newer than "1.0.9".
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(x.count, y.count) {
+            let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
+            if p != q { return p > q }
+        }
+        return false
+    }
+
+    func fetchLatest(_ done: @escaping (Release?) -> Void) {
+        var req = URLRequest(url: App.LATEST_RELEASE, timeoutInterval: 20)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            var rel: Release?
+            if let data = data, let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+               let tag = d["tag_name"] as? String, let page = (d["html_url"] as? String).flatMap(URL.init(string:)) {
+                let assets = d["assets"] as? [[String: Any]] ?? []
+                let dmg = assets.first { ($0["name"] as? String)?.hasSuffix(".dmg") == true }?["browser_download_url"] as? String
+                rel = Release(version: tag.hasPrefix("v") ? String(tag.dropFirst()) : tag, download: dmg.flatMap(URL.init(string:)) ?? page, page: page)
+            }
+            DispatchQueue.main.async { done(rel) }
+        }.resume()
+    }
+
+    /// From the minute timer: look at most once a day, then offer it when the time is right.
+    /// A copy built from source (version 1.0) doesn't nag; Check for Updates… still works there.
+    func checkForUpdate() {
+        guard App.version != "1.0" else { return }
+        let last = prefs.double(forKey: "updateChecked")
+        if Date().timeIntervalSince1970 - last > 20 * 3600 {
+            prefs.set(Date().timeIntervalSince1970, forKey: "updateChecked")
+            fetchLatest { [weak self] rel in
+                guard let self = self, let rel = rel, App.isNewer(rel.version, than: App.version) else { return }
+                self.updateOffer = rel
+            }
+        }
+        offerUpdate()
+    }
+
+    func offerUpdate(force: Bool = false) {
+        guard let rel = updateOffer, bubble != nil, !hiddenByUser, !asker.busy, bubbleMode != "welcome",
+              force || (prefs.string(forKey: "updateSkipped") != rel.version && App.idleSeconds() < 120
+                        && prefs.bool(forKey: "welcomed") && !(bubbleMode == "chat" && bubble.isVisible)) else { return }
+        prefs.set(rel.version, forKey: "updateSkipped")          // mention each version once (Not now means not again)
+        bubbleMode = "chat"; bubbleJump = nil
+        bubbleJS("bubble.chat(false)")
+        bubbleJS("bubble.update(\(jsonLiteral(rel.version)), \(jsonLiteral(App.version)))")
+        showBubble(key: false)
+    }
+
     @objc func checkUpdates() {
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let r = alert("Fox Buddy \(v)", "New versions are on the Releases page: download the latest, and drag it over this one in Applications.", buttons: ["Open Releases", "Close"])
-        if r == .alertFirstButtonReturn, let u = URL(string: RELEASES_URL) { NSWorkspace.shared.open(u) }
+        fetchLatest { [weak self] rel in
+            guard let self = self else { return }
+            if let rel = rel, App.isNewer(rel.version, than: App.version) { self.updateOffer = rel; self.offerUpdate(force: true) }
+            else if rel != nil { self.say("You're on the latest version of me (\(App.version)).") }
+            else {
+                let r = self.alert("Fox Buddy \(App.version)", "I couldn't reach GitHub to check. New versions are on the Releases page: download the latest, and drag it over this one in Applications.", buttons: ["Open Releases", "Close"])
+                if r == .alertFirstButtonReturn, let u = URL(string: RELEASES_URL) { NSWorkspace.shared.open(u) }
+            }
+        }
     }
     @objc func playNamed(_ s: NSMenuItem) { if let n = s.representedObject as? String { play(n) } }
     @objc func playRandomClip() { if let n = clips.randomElement() { play(n) } }
@@ -1592,6 +1658,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if body.keys.contains("welcome") { finishWelcome(body["welcome"] as? [String: Any]) }
         if body["newChat"] as? Bool == true { asker.reset() }
         if body["editNotes"] as? Bool == true { openNotesFile() }
+        if let u = body["update"] as? String {
+            if u == "download", let rel = updateOffer { NSWorkspace.shared.open(rel.download); say("Downloading. Open the DMG from your Downloads, drag me into Applications and choose Replace. Your settings stay put.") }
+            if u == "notes", let rel = updateOffer { NSWorkspace.shared.open(rel.page) }
+        }
         if let q = body["open"] as? String, !q.isEmpty {
             asker.cancel()                                // any reply still on its way: Claude Desktop has it now
             bubbleJS("bubble.stopped('Carried on in Claude Desktop.')")

@@ -240,6 +240,14 @@
       W.i = 0; W.a = { name: '', foxName: foxName && foxName !== 'Fox' ? foxName : '', style: 'wit', work: '', brief: brief || 'weekdays' };
       mode('welcome'); wRender();
     },
+    // a newer version of him is out
+    update(v, mine) {
+      const d = addFox(markdown(`**There's a new version of me: ${v}.** You have ${mine}. It's a quick swap, and your settings stay put.`) +
+        '<div class="tools"><button class="link dl">Download</button> <button class="link notes">What\'s new</button> <button class="link later">Not now</button></div>');
+      d.querySelector('.dl').onclick = () => post({ update: 'download' });
+      d.querySelector('.notes').onclick = () => post({ update: 'notes' });
+      d.querySelector('.later').onclick = () => post({ action: 'dismiss' });
+      scrollDown(); report(); },
     shown() { tucked = false; lastActive = Date.now(); },
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };

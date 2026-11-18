@@ -40,6 +40,14 @@ Accessibility → deskbuddy-appwatch**). Calendar and Slack settings: see the ma
 Using claude.ai in Chrome or Safari instead of the desktop app? Load the extension in
 [`tools/browserwatch`](../browserwatch/README.md) and he reacts to browser chats too.
 
+### Updates
+
+Once a day he asks GitHub whether there's a newer release (an anonymous request, with nothing about you
+in it). If there is, he mentions it once in his chat the next time you're at the Mac, with **Download**,
+**What's new** and **Not now**. Download the DMG, drag him into Applications and choose **Replace**:
+your settings, notes and connections stay. **Setup › Check for Updates…** checks right away. A copy
+built from source doesn't check by itself.
+
 ### Which Claude plan
 
 His chat runs on Claude Code, which needs **Claude Pro, Max** (or a Team, Enterprise or Console account).
