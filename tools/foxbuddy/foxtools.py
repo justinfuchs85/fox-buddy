@@ -13,6 +13,9 @@ each of his chats. It can't change anything.
 
 Run by the app (tools/foxbuddy/main.swift) as:
   python3 foxtools.py --folder ~/Desktop --folder ~/Documents --activity-dir "~/Library/Mobile Documents/..."
+
+It's also his gate (see gate() below): `python3 foxtools.py --gate <policy.json>`, the PreToolUse hook that
+checks every tool call in his chats.
 """
 import fnmatch, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime
@@ -294,7 +297,52 @@ TOOLS = [
 ]
 
 
+def gate(policy_path, stdin):
+    """The PreToolUse hook on every tool call in his chats (Claude Code runs `foxtools.py --gate <policy>`).
+    Returns (allowed, why). It's the last word, whatever your own Claude Code settings allow:
+      - a tool not in the policy's "allow" list is refused,
+      - Read only inside the policy's "read_roots" (symlinks resolved),
+      - the one approved change (policy "approval": {"tool", "input"}) only with exactly the approved
+        arguments, and only once: it's struck from the policy file as it goes through.
+    Anything unexpected (no policy, unreadable input) refuses: it fails closed."""
+    try:
+        with open(policy_path) as f:
+            policy = json.load(f)
+        call = json.loads(stdin or "{}")
+    except (OSError, ValueError) as e:
+        return False, f"Fox Buddy's tool gate couldn't read its policy ({type(e).__name__}), so it refused the call."
+    tool, args = call.get("tool_name") or "", call.get("tool_input")
+    approval = policy.get("approval") or None
+    if approval and tool == approval.get("tool"):
+        if args != approval.get("input"):
+            return False, ("Refused: those aren't the arguments the user approved. The approved call is " + tool +
+                           " with exactly: " + json.dumps(approval.get("input"), sort_keys=True))
+        policy["approval"] = None                                 # once only
+        tmp = policy_path + ".tmp"
+        try:
+            with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+                json.dump(policy, f)
+            os.replace(tmp, policy_path)
+        except OSError:
+            return False, "Fox Buddy's tool gate couldn't record the approval as used, so it refused the call."
+        return True, ""
+    if tool not in (policy.get("allow") or []):
+        return False, f"Refused: {tool} isn't one of the fox's tools." + (
+            " A change needs the user's approval first (propose it with a fox-confirm block)." if tool.startswith("mcp__") else "")
+    if tool == "Read":
+        path = str((args or {}).get("file_path") or "")
+        roots = [real(r) for r in policy.get("read_roots") or []]
+        if not path.startswith("/") or not inside(path, roots):
+            return False, "Refused: he may only open files inside " + (", ".join(roots) or "no folders") + "."
+    return True, ""
+
+
 def main(argv):
+    if len(argv) == 2 and argv[0] == "--gate":
+        ok, why = gate(argv[1], sys.stdin.read())
+        if not ok:
+            sys.stderr.write(why + "\n")
+        sys.exit(0 if ok else 2)                                  # exit 2: Claude Code blocks the call and tells him why
     roots, dirs, money = [], [], None
     it = iter(argv)
     for a in it:

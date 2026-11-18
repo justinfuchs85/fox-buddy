@@ -87,6 +87,15 @@ Each message runs Claude Code in print mode (`claude -p`) in "don't ask" mode: a
 list below is refused, never prompted for. He has no shell, can't edit, move or delete files, and
 never sends email.
 
+**The gate.** Claude Code still loads your own settings, so an allow rule you've added there (for
+another connector, say) would otherwise apply to him too. So every tool call in his chats first goes
+through his gate, a PreToolUse hook (`foxtools.py --gate`) that the app passes in with `--settings`.
+It refuses any tool not on his list, whatever your settings allow, keeps `Read` inside your folders
+(symlinks resolved), and lets an approved change through only with exactly the arguments you approved,
+and only once. It fails closed: if it can't read its policy, the call is refused. Its policy files live in
+`~/.desk-buddy/gate` and are deleted when each reply comes back. If your Claude Code settings switch
+hooks off (`disableAllHooks`), he won't chat until you remove that setting.
+
 | He can | How | Limits |
 |---|---|---|
 | Find files | His own tool (`foxtools.py`) searches by name in Desktop, Documents and Downloads | Names, sizes and dates only. Each file he mentions gets a **Show in Finder** button. |
@@ -98,10 +107,16 @@ never sends email.
 | Read Google Calendar | Your claude.ai Google Calendar connector: calendars, events, free time | |
 | Change your calendar, write Gmail drafts | Only after you approve | See below |
 
-**Changes need your OK.** When you ask for a change ("move my dentist appointment to Friday at 3"),
-he looks things up, then shows a card: *Calendar change: Move "Dentist" from Thu 2:00 PM to Fri 3:00 PM*,
-with **Yes, do it** and **No**. Only **Yes** lets him make that kind of change, for that one reply
-(calendar changes, or Gmail drafts, never both). Sending another message cancels a card you haven't answered.
+**Changes need your OK, one exact call at a time.** When you ask for a change ("move my dentist
+appointment to Friday at 3"), he looks things up, then proposes one call: which tool, and its exact
+arguments. You get a card: *Calendar: Move "Dentist" from Thu 2:00 PM to Fri 3:00 PM*, every argument
+under **Exactly what he'll do**, and **Yes, do it** and **No**. If a calendar change names anyone's
+email address, the card warns that Google Calendar may email them (an invitation is an email). Gmail
+cards say the draft is saved, not sent.
+
+**Yes** lets him make that one call, once, with those arguments: the gate refuses a different tool, any
+changed argument (a guest slipped in, say) and a second try. Sending another message cancels a card you
+haven't answered.
 
 **Notes about you.** Right-click → **What He Knows About You…** opens `~/.desk-buddy/fox-notes.md`.
 Whatever you write there goes along with every question (so to Claude too): your name, your role,

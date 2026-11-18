@@ -68,6 +68,12 @@
   .confirm.settled { border-color: var(--line); }
   .confirm.settled .actions { display: none; }
   .confirm .result { color: var(--muted); font-size: 12px; }
+  .confirm .warn { color: var(--needs); font-weight: 600; font-size: 12px; margin: -4px 0 8px; }
+  .confirm .note { color: var(--muted); font-size: 12px; margin: -4px 0 8px; }
+  .confirm .args { font-size: 11.5px; margin: 0 0 8px; color: var(--muted); }
+  .confirm .args summary { cursor: pointer; font-weight: 600; }
+  .confirm .args div { word-break: break-word; margin-top: 3px; }
+  .confirm .args .k { font-weight: 600; color: var(--ink); }
   [hidden] { display: none !important; }
 </style></head>
 <body>
@@ -162,9 +168,11 @@
     chat(focus = true) { clearTimeout(ttlTimer); $('card').className = ''; mode('chat'); scrollDown(); if (focus) setTimeout(() => $('input').focus(), 30); },
     thinking(q) { turns.push({ you: q, fox: '' }); addYou(q); pending(); setBusy(true); mode('chat'); scrollDown(); },
     answer(text) { dropPending(); setBusy(false);
-      // A change he wants to make arrives as a last line "[[confirm calendar: ...]]": it becomes a button, never text.
-      let ask = null;
-      text = String(text).replace(/^[ \t]*\[\[confirm (calendar|gmail):[ \t]*([^\]\n]{1,500})\]\][ \t]*$/gim, (m, kind, what) => { ask = { kind: kind.toLowerCase(), summary: what.trim() }; return ''; }).trim();
+      // A change he wants to make arrives as a ```fox-confirm block: one tool and its exact arguments. It becomes a card
+      // showing all of them, never text. (The app checks the tool again, and the gate holds him to these arguments.)
+      let ask = null, unreadable = false;
+      text = String(text).replace(/```fox-confirm[ \t]*\n([\s\S]*?)```/g, (m, body) => { ask = proposal(body); if (!ask) unreadable = true; return ''; }).trim();
+      if (ask) unreadable = false;
       if (turns.length) turns[turns.length - 1].fox = text;
       const d = addFox(markdown(text) + '<div class="tools"><button class="link copy">Copy</button></div>');
       d.querySelector('button.copy').onclick = e => { post({ copy: text }); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1200); };
@@ -176,16 +184,36 @@
         }
       });
       if (ask) confirmCard(d, ask);
+      else if (unreadable) { settleAll('Not done.'); const n = document.createElement('div'); n.className = 'confirm settled';
+        n.innerHTML = '<div class="result">He proposed a change, but not in a form that can be checked, so there\'s nothing to approve. Ask him again.</div>'; d.appendChild(n); }
       scrollDown(); report(); },
     error(text) { dropPending(); setBusy(false); addFox(markdown(text), 'err'); scrollDown(); report(); },
     stopped(why) { if (!busy) return; dropPending(); setBusy(false); addFox(esc(why || 'Stopped.'), 'err'); report(); },
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };
-  // A change waiting for your OK. Only the newest one can be approved; sending anything else cancels it.
+  const CALENDAR_TOOLS = ['create_event', 'update_event', 'delete_event', 'respond_to_event'], GMAIL_TOOLS = ['create_draft', 'update_draft'];
+  // {tool, summary, input} from a fox-confirm block, or null if it isn't one of the change tools with an arguments object.
+  function proposal(body) {
+    let p; try { p = JSON.parse(body); } catch (e) { return null; }
+    if (!p || typeof p !== 'object' || ![...CALENDAR_TOOLS, ...GMAIL_TOOLS].includes(p.tool)) return null;
+    if (!p.input || typeof p.input !== 'object' || Array.isArray(p.input) || typeof p.summary !== 'string' || !p.summary.trim()) return null;
+    return { tool: p.tool, summary: p.summary.trim().slice(0, 500), input: p.input };
+  }
+  const EMAIL = /[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  const shown = v => { const s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > 400 ? s.slice(0, 400) + '…' : s; };
+  // A change waiting for your OK: what he says it does, and every argument it would really be made with.
+  // Only the newest one can be approved; sending anything else cancels it.
   function confirmCard(d, ask) {
     settleAll('Not done.');
+    const calendar = CALENDAR_TOOLS.includes(ask.tool);
+    const emails = [...new Set(JSON.stringify(ask.input).match(EMAIL) || [])];
+    const warn = calendar && emails.length && ask.tool !== 'delete_event'
+      ? `<div class="warn">Google Calendar may email: ${esc(emails.join(', '))}</div>`
+      : !calendar ? '<div class="note">Saved as a draft in Gmail. Nothing is sent.</div>' : '';
+    const rows = Object.entries(ask.input).map(([k, v]) => `<div><span class="k">${esc(k)}</span> ${esc(shown(v))}</div>`).join('');
     const card = document.createElement('div'); card.className = 'confirm live';
-    card.innerHTML = `<div class="what">${ask.kind === 'calendar' ? 'Calendar change' : 'Gmail draft'}: ${esc(ask.summary)}</div>` +
+    card.innerHTML = `<div class="what">${calendar ? 'Calendar' : 'Gmail draft'}: ${esc(ask.summary)}</div>` + warn +
+      `<details class="args" open><summary>Exactly what he'll do (${esc(ask.tool)})</summary>${rows || '<div>(no arguments)</div>'}</details>` +
       '<div class="actions"><button class="act primary yes">Yes, do it</button><button class="act no">No</button></div><div class="result" hidden></div>';
     card.querySelector('.yes').onclick = () => {
       if (busy) return;

@@ -109,5 +109,60 @@ class Finances(unittest.TestCase):
             self.assertNotIn("finances", names)
 
 
+class Gate(unittest.TestCase):
+    """foxtools.py --gate: the PreToolUse hook on every call in his chats (exit 0 allows, exit 2 refuses)."""
+    CREATE = "mcp__claude_ai_Google_Calendar__create_event"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.docs = os.path.join(self.dir, "Documents"); os.makedirs(self.docs)
+        open(os.path.join(self.docs, "notes.txt"), "w").close()
+        os.symlink("/etc", os.path.join(self.docs, "etc-link"))
+        self.policy = os.path.join(self.dir, "gate.json")
+        self.write({"allow": ["ToolSearch", "WebSearch", "Read"], "read_roots": [self.docs], "approval": None})
+
+    def write(self, policy):
+        with open(self.policy, "w") as f:
+            json.dump(policy, f)
+
+    def gate(self, tool, args=None, policy=None):
+        r = subprocess.run([sys.executable, TOOLS, "--gate", policy or self.policy], capture_output=True, text=True, timeout=10,
+                           input=json.dumps({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": args or {}}))
+        self.assertIn(r.returncode, (0, 2))
+        return r.returncode == 0, r.stderr
+
+    def test_only_listed_tools(self):
+        self.assertTrue(self.gate("WebSearch", {"query": "weather"})[0])
+        ok, why = self.gate("mcp__claude_ai_Supabase__execute_sql", {"query": "drop table x"})   # allowed by your own settings or not
+        self.assertFalse(ok)
+        self.assertIn("isn't one of the fox's tools", why)
+        self.assertFalse(self.gate("Bash", {"command": "ls"})[0])
+
+    def test_reads_only_inside_the_folders(self):
+        self.assertTrue(self.gate("Read", {"file_path": os.path.join(self.docs, "notes.txt")})[0])
+        self.assertFalse(self.gate("Read", {"file_path": os.path.expanduser("~/.desk-buddy/config.json")})[0])
+        self.assertFalse(self.gate("Read", {"file_path": os.path.join(self.docs, "etc-link", "hosts")})[0])    # a symlink out
+        self.assertFalse(self.gate("Read", {"file_path": os.path.join(self.docs, "..", "gate.json")})[0])
+        self.assertFalse(self.gate("Read", {"file_path": "notes.txt"})[0])                                    # relative
+
+    def test_the_approved_call_once_with_exactly_its_arguments(self):
+        event = {"summary": "Dentist", "start": "2026-11-20T15:00", "attendees": []}
+        self.write({"allow": ["ToolSearch"], "approval": {"tool": self.CREATE, "input": event}})
+        ok, why = self.gate(self.CREATE, dict(event, attendees=["someone@evil.example"]))
+        self.assertFalse(ok)                                       # an attendee slipped in: refused
+        self.assertIn("aren't the arguments the user approved", why)
+        self.assertFalse(self.gate("mcp__claude_ai_Google_Calendar__delete_event", {"eventId": "x"})[0])   # another change: refused
+        self.assertTrue(self.gate(self.CREATE, dict(reversed(list(event.items()))))[0])   # the same arguments (any key order)
+        self.assertFalse(self.gate(self.CREATE, event)[0])         # but only once
+        with open(self.policy) as f:
+            self.assertIsNone(json.load(f)["approval"])
+
+    def test_fails_closed(self):
+        self.assertFalse(self.gate("WebSearch", policy=os.path.join(self.dir, "missing.json"))[0])
+        with open(self.policy, "w") as f:
+            f.write("not json")
+        self.assertFalse(self.gate("WebSearch")[0])
+
+
 if __name__ == "__main__":
     unittest.main()
