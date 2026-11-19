@@ -887,6 +887,47 @@ class NarrationTest(BridgeTest):
         self.b.hook({"hook_event_name": "UserPromptSubmit", "session_id": "s", "cwd": "/p"}, app="$(rm -rf ~)")
         self.assertNotIn("app", self.b.sessions["s"])
 
+    def transcript(self, d, records):
+        t = os.path.join(d, "t.jsonl")
+        with open(t, "w") as f:
+            for r in records: f.write(json.dumps(r) + "\n")
+        return t
+
+    def test_long_turns_get_a_recap(self):
+        d = tempfile.mkdtemp(prefix="fakeclaude-"); self.addCleanup(shutil.rmtree, d, True)
+        t = self.transcript(d, [
+            {"type": "user", "message": {"content": "old question"}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "old answer"}]}},
+            {"type": "user", "message": {"content": [{"type": "text", "text": "Fix the login bug"}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "Looking."}, {"type": "tool_use", "name": "Edit", "input": {}}]}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}},
+            {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Edit", "input": {}}, {"type": "tool_use", "name": "Bash", "input": {}}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "Fixed it; tests pass."}]}},
+        ])
+        with mock.patch.object(bridge.os.path, "expanduser", lambda p: p.replace("~/.claude", d)):
+            turn = bridge.last_turn(t)
+            self.assertIn("You asked: Fix the login bug", turn)
+            self.assertIn("Edit x2", turn); self.assertIn("Bash x1", turn)
+            self.assertTrue(turn.index("Looking.") < turn.index("Fixed it"))
+            self.assertNotIn("old", turn)
+            self.assertEqual(bridge.last_turn("/etc/passwd"), "")
+            self.hook("UserPromptSubmit", "s", cwd="/p/shop", transcript_path=t)
+            self.clock.advance(bridge.RECAP_AFTER + 5)
+            self.hook("Stop", "s", cwd="/p/shop", transcript_path=t)
+            self.assertIn("Fix the login bug", self.said()[-1]["recap"])
+            # a quick one: no recap
+            self.hook("UserPromptSubmit", "s", cwd="/p/shop", transcript_path=t)
+            self.clock.advance(20)
+            self.hook("Stop", "s", cwd="/p/shop", transcript_path=t)
+            self.assertNotIn("recap", self.said()[-1])
+
+    def test_background_checks_are_ignored(self):
+        sid = bridge.QUIET_PREFIX + "1234-4abc-8def-1234567890ab"
+        self.hook("UserPromptSubmit", sid)
+        self.hook("Stop", sid)
+        self.assertNotIn(sid, self.b.sessions)
+        self.assertEqual(self.said(), [])
+
     def test_last_reply_only_reads_claude_transcripts(self):
         d = tempfile.mkdtemp(prefix="fakeclaude-"); self.addCleanup(shutil.rmtree, d, True)
         t = os.path.join(d, "t.jsonl")

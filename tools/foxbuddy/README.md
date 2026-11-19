@@ -96,6 +96,9 @@ outright, he says so instead of hanging, and IT needs to allow `api.anthropic.co
   - **Show Off**: cycles through every mood
   - **What He Knows About You**: shows his notes about you in his chat, with an **Edit my notes** button (see [His tools](#his-tools))
   - **Morning Check-In**: check in now, which days, from what time
+  - **Meetings**: offer prep before meetings (on or off), **Wrap Up My Day Now**, and when the weekday wrap-up starts (3 to 7 PM, or none)
+  - **Look at My Screen**: attaches a picture of your screen to his chat (see [His tools](#his-tools))
+  - **Speech Bubble › Recap Long Claude Code Jobs**: on by default
   - **Size**: Small, Medium, Large or Huge
   - **Look**:
     - **Floating** (the default): a light outline with a soft dark halo, so he reads on any wallpaper
@@ -145,6 +148,9 @@ hooks off (`disableAllHooks`), he won't chat until you remove that setting.
 | Read Google Calendar | Your claude.ai Google Calendar connector: calendars, events, free time | |
 | Change your calendar, write Gmail drafts, add or complete a reminder, make a note, run a shortcut | Only after you approve | See below. A shortcut can do anything it's built to do, so its card says so. |
 | Remember things about you | Adds a line to his notes | Only after you click **Save it** |
+| Look at your screen | Only when you press the screen button in his bubble (or right-click › Look at My Screen): a picture of each display, with him and his bubble hidden for it | Attached to the chat like a dropped file: it goes to Claude only with your next message, and × removes it. macOS asks for Screen Recording the first time. Saved in `~/.desk-buddy/drops`, cleared when he starts. |
+| Meeting prep | Every 30 minutes while you're at your Mac, he asks your Calendar connector (on Claude's lightest model) for the next 12 hours of meetings and saves them in `~/.desk-buddy/meetings.json`. About ten minutes before each one he offers **Prep me** | Prep runs only when you click it. With a calendar link in `config.json` (`calendar_ics`), he uses that instead of asking. |
+| Recaps | When a Claude Code turn has run 3 minutes or more, the bridge passes what you asked and what Claude said and did (from the session's transcript under `~/.claude`) to Claude's lightest model for a two-sentence summary | Only for your own sessions; his background checks never show up as Claude working. Right-click › Speech Bubble to turn off. |
 | Email alerts | Gmail searches he runs every 15 minutes (5, 30, 60 or off: right-click › Email Alerts) while you're at your Mac, on Claude's lightest model to spare your usage | Set up only after you click **Set it up**. New mail only, each email once. Saved in `~/.desk-buddy/email-alerts.json`. |
 
 **Changes need your OK, one exact call at a time.** When you ask for a change ("move my dentist
@@ -176,6 +182,12 @@ any budget that's over (with a finance tool of your own), and yesterday's steps 
 It's a fresh chat, so you can ask follow-ups right there. Right-click → **Morning Check-In** for
 **Check In Now**, weekdays or every day or off, and the hour it starts. Each check-in is one chat
 with Claude, so it counts toward your usage like any other.
+
+**Meeting prep and the wrap-up.** About ten minutes before a meeting (one with a set time, that you
+haven't declined), he offers to prep you: click **Prep me** and he looks at the invite and your recent
+email with those people or about that topic, in a fresh chat. On weekdays from 5 PM, the first time
+you're at your Mac, he **wraps up your day**: email that still needs a reply, tomorrow's first meetings,
+and reminders due. Right-click → **Meetings** to change either.
 
 **Settings** (optional, in `~/.desk-buddy/config.json`):
 

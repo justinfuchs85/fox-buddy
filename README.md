@@ -32,7 +32,12 @@ justinfuchs85/fox-buddy/fox-buddy`. His chat needs Claude Pro or Max; he install
   first time he opens set his name and how chatty he is, and **What He Knows About You** shows it all in
   his chat. A **morning check-in** gives you today's meetings and the email that needs you, and
   **email alerts** ("tell me when anything from Jane comes in") make him hold up a letter when matching mail
-  arrives: he checks every 15 minutes while you're at your Mac (right-click › Email Alerts).
+  arrives: he checks every 15 minutes while you're at your Mac (right-click › Email Alerts). About ten
+  minutes before a meeting he offers to **prep you** for it, on weekdays at 5 PM he **wraps up your day**,
+  and when a Claude Code job has run for a few minutes he **recaps** what got done.
+- **Looks at your screen, only when you ask**: his bubble's screen button (or right-click › Look at My
+  Screen) attaches a picture of your screen to the chat, without him in it. It goes nowhere until you
+  send a message, and you can remove it first.
 - **Wakes up when you come over**: he dozes when nothing's going on. Click him, or rest your pointer on
   him for a second, and he yawns, rubs his eyes and waves; while you type in his bubble, he watches.
 - **Gags**: once he's awake, click him for one of 14 (pounce, tail chase, zoomies, floss, dab, dubstep
