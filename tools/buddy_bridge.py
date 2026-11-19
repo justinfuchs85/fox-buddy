@@ -227,6 +227,8 @@ def command_clip(cmd, worked, payload):
 # line each and sends them to the desktop app only ("n <json>": the board has no bubble). Nothing here is
 # logged: a line can include a command or the start of Claude's reply.
 QUICK_ASK_DIR = os.path.join(HOME, "ask")          # Fox Buddy's quick questions run here: never narrated
+QUIET_PREFIX = "0000f0c5-"     # session ids of Fox Buddy's background checks (email, calendar, recaps): ignored entirely
+RECAP_AFTER = 180              # a Claude Code turn that ran this long (seconds) gets a recap when it's done
 FOX_TOOLS = os.path.join(HOME, "fox-tools.json")    # his extra tools; an entry's "act" is the work act he plays with it
 _fox_acts = {"mtime": None, "acts": {}}
 
@@ -310,6 +312,51 @@ def last_reply(transcript_path, limit=140):
     except Exception:
         pass
     return ""
+
+
+def last_turn(transcript_path, limit=8000):
+    """What you last asked a Claude Code session, and what it said and did since, as plain text for a recap
+    (at most `limit` characters, the newest kept). Only from transcripts under ~/.claude; "" if unreadable."""
+    try:
+        real = os.path.realpath(transcript_path or "")
+        if not real.endswith(".jsonl") or not real.startswith(os.path.realpath(os.path.expanduser("~/.claude")) + os.sep):
+            return ""
+        with open(real, "rb") as f:
+            f.seek(0, 2); size = f.tell(); f.seek(max(0, size - 2_000_000))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+        said, tools, asked = [], {}, ""
+        for line in reversed(lines):
+            try: rec = json.loads(line)
+            except ValueError: continue
+            msg = rec.get("message") or {}
+            content = msg.get("content")
+            if rec.get("type") == "user":
+                if isinstance(content, str): asked = content
+                elif isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "text" for b in content) \
+                        and not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                    asked = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+                if asked: break
+                continue
+            if rec.get("type") != "assistant" or not isinstance(content, list):
+                continue
+            for b in reversed(content):
+                if not isinstance(b, dict): continue
+                if b.get("type") == "text" and b.get("text", "").strip():
+                    said.append(" ".join(b["text"].split()))
+                elif b.get("type") == "tool_use":
+                    name = str(b.get("name") or "tool").replace("mcp__", "").replace("__", " ")
+                    tools[name] = tools.get(name, 0) + 1
+        if not said and not tools:
+            return ""
+        out = "You asked: " + _short(" ".join(asked.split()), 1500) + "\n"
+        if tools:
+            out += "Tools used: " + ", ".join(f"{k} x{v}" for k, v in sorted(tools.items(), key=lambda kv: -kv[1])[:12]) + "\n"
+        body = "\n".join(reversed(said))
+        room = max(500, limit - len(out) - 20)
+        if len(body) > room: body = "..." + body[-room:]
+        return out + "Claude said:\n" + body
+    except Exception:
+        return ""
 
 
 def desktop_clips():
@@ -911,6 +958,8 @@ class Buddy:
     # ---- session bookkeeping ----
     def hook(self, p, app=None):
         ev, sid, now = p.get("hook_event_name", ""), p.get("session_id", "?"), time.time()
+        if str(sid).startswith(QUIET_PREFIX):
+            return                                    # one of Fox Buddy's own background checks: not something to show
         event = None
         say = None                                    # what to put in Fox Buddy's speech bubble, if anything
         with self.lock:
@@ -930,6 +979,7 @@ class Buddy:
                     event = "hello"
             elif ev == "UserPromptSubmit":
                 state = "working"
+                s["asked"] = now                # for a recap, if this turn runs long
                 s.pop("unseen", None)           # you're back in this session: result seen
                 self.last_active = now
                 self.sound("on_it")
@@ -1008,12 +1058,17 @@ class Buddy:
             return (f"{project}: has a question for you", "needs", jump)
         if ev == "Stop" and prev != "done":
             reply = last_reply(p.get("transcript_path"))
-            return (f"{project} is done" + (f": {reply}" if reply else "."), "done", jump)
+            extra = None
+            if s.get("asked") and time.time() - s["asked"] >= RECAP_AFTER:
+                turn = last_turn(p.get("transcript_path"))
+                if turn: extra = {"recap": turn}
+            s.pop("asked", None)
+            return (f"{project} is done" + (f": {reply}" if reply else "."), "done", jump, extra)
         if ev == "StopFailure":
             return (f"{project} stopped with an error.", "done", jump)
         return None
 
-    def narrate(self, text, kind, jump=None):
+    def narrate(self, text, kind, jump=None, extra=None):
         """Send a line to Fox Buddy's speech bubble. Busy chatter is thinned out; needs-you and done always go."""
         if getattr(self.dev, "link", None) != "desktop":
             return
@@ -1036,7 +1091,7 @@ class Buddy:
         else:
             self._narration_next = None                 # needs-you / done supersede any busy line still waiting
             self._last_narration = (text, now)
-        self.dev.send("n " + json.dumps({"text": text, "kind": kind, "jump": jump}, ensure_ascii=False), quiet=True)
+        self.dev.send("n " + json.dumps({"text": text, "kind": kind, "jump": jump, **(extra or {})}, ensure_ascii=False), quiet=True)
 
     def external(self, sid, state, stale=None, account=PERSONAL):
         """State from a non-hook source (the app watcher for Chat and Cowork)."""

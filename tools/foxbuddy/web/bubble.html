@@ -194,6 +194,7 @@
         <div class="row">
           <button class="chip" id="files" title="Let him read inside files in the folders he can search, for this chat only">Files: names only</button>
           <span class="spacer"></span>
+          <button class="mic" id="look" title="Show him your screen: takes a picture you can check (and remove) before you send" aria-label="Show him my screen"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 17h6M10 13.5V17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           <button class="mic" id="mic" title="Dictate instead of typing (macOS Dictation)" aria-label="Dictate"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="7" y="2" width="6" height="10" rx="3" fill="currentColor"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           <button class="act primary" id="send" title="Return sends. ⌘-Return opens this in Claude instead.">Send</button>
         </div>
@@ -312,7 +313,7 @@
       const d = addFox(markdown(body) + '<div class="tools"><button class="link edit">Edit my notes</button></div>');
       d.querySelector('button.edit').onclick = () => post({ editNotes: true });
       scrollDown(); report(); },
-    brief(text) { window.bubble.reset(); turns.push({ you: 'Morning check-in, please.', fox: '' }); window.bubble.answer(text); },
+    brief(text, you) { window.bubble.reset(); turns.push({ you: you || 'Morning check-in, please.', fox: '' }); window.bubble.answer(text); },
     stopped(why) { if (!busy) return; dropPending(); setBusy(false); addFox(esc(why || 'Stopped.'), 'err'); report(); },
     welcome(foxName, brief) {
       clearTimeout(ttlTimer); $('card').className = '';
@@ -470,6 +471,7 @@
   let typedAt = 0;                                   // he watches you type (the app turns him toward the bubble)
   $('input').addEventListener('keydown', () => { const t = Date.now(); if (t - typedAt > 300) { typedAt = t; post({ typing: true }); } });
   $('mic').onclick = () => { $('input').focus(); post({ dictate: true }); };
+  $('look').onclick = () => post({ lookAtScreen: true });
   $('input').addEventListener('input', () => { const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight + 2) + 'px'; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') post({ action: 'dismiss' }); });
   mode('say');
