@@ -441,7 +441,10 @@ def gate(policy_path, stdin):
         return True, ""
     if tool not in (policy.get("allow") or []):
         return False, f"Refused: {tool} isn't one of the fox's tools." + (
-            " A change needs the user's approval first (propose it with a fox-confirm block)." if tool.startswith("mcp__") else "")
+            " If it's a change to the calendar, a Gmail draft, a reminder, a note or a shortcut, it needs the user's approval "
+            "first (propose it with a fox-confirm block). Any other app (Figma, Slack, Notion, Drive and so on) isn't one he "
+            "can use at all: it hasn't disconnected, so don't say it has. Tell the user he can't use it from here, and that "
+            "Open in Claude (under the chat) moves this conversation to Claude, which can." if tool.startswith("mcp__") else "")
     if tool == "Read":
         path = str((args or {}).get("file_path") or "")
         roots = [real(r) for r in policy.get("read_roots") or []]

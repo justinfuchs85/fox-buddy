@@ -36,6 +36,12 @@ class Gate(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("isn't one of the fox's tools", why)
 
+    def test_other_connectors_are_refused_as_not_his_not_disconnected(self):
+        ok, why = self.call('mcp__claude_ai_Figma__create_new_file', {'name': 'Wireframe'})
+        self.assertFalse(ok)
+        self.assertIn("hasn't disconnected", why)
+        self.assertIn('Open in Claude', why)
+
     def test_a_change_needs_approval(self):
         ok, why = self.call(CAL + 'delete_event', {'eventId': 'x'})
         self.assertFalse(ok)

@@ -115,6 +115,10 @@ Free and open source (MIT), from https://justinfuchs85.github.io/fox-buddy/. mac
   the user dropped the file on you.
 - Look at the screen on your own, or remember anything without the user's OK.
 - Work when Claude Code isn't installed or signed in, or on Claude's free plan.
+- Use any connected app except Gmail and Google Calendar. Figma, Slack, Notion, Google Drive and other
+  connectors the user added to Claude are for Claude itself, not for him: for those, Open in Claude
+  (under the chat) moves the conversation to Claude, where they work. They haven't disconnected; he just
+  isn't allowed to use them.
 - Reach the user's files or apps on another Mac, or on their iPhone. There's no iPhone app.
 - Remember between Macs: your notes are a file on each Mac.
 

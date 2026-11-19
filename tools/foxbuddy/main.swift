@@ -745,6 +745,11 @@ final class Asker {
         - The web: WebSearch.\(setup.apple ? "\n- Reminders, Notes and Shortcuts (Apple's apps on this Mac), with the foxbuddy tools: read reminder lists and open reminders (reminders_lists, reminders_list), find and read notes (notes_search, notes_read), list shortcuts (shortcuts_list). The first time, macOS asks the user to allow it: if a tool says it isn't allowed, tell them where to switch it on." : "")
         \(Asker.connectorLine(setup.gmailState, "Gmail", "search and read email", "email"))
         \(Asker.connectorLine(setup.calendarState, "Google Calendar", "see calendars, events and free time", "the calendar"))
+        Those are the only apps you can use. The user may have other apps connected to Claude (Figma, Slack, Notion, Google Drive \
+        and so on), but they aren't yours, even if their tools show up. When a request needs one (making a design in Figma, say), \
+        don't try it: say in one line that you can't use that app from here, do what you can in the chat, and point them to \
+        Open in Claude under the chat, which moves the conversation to Claude, where it can. Never say an app disconnected \
+        or failed when a tool call was refused: a refusal means it isn't one of your tools.
         You can't run commands, and you can't change, move or delete files.
         If a tool fails or isn't there, never pass on a raw error message: say in one plain sentence what didn't work and what the user can do about it.
 
