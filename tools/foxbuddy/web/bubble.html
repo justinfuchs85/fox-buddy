@@ -278,7 +278,10 @@
       $('text').innerHTML = inline(m.text || '');
       $('sayActions').hidden = !m.jump; $('jump').textContent = m.jumpLabel || 'Show me';
       mode('say');
-      timeout(m.kind === 'needs' ? 0 : m.kind === 'done' ? 14 : 6);
+      // How long a line stays up (the clock pauses while your pointer's on it). An alert that needs you, or an
+      // offer with a button (Prep me, Open in Gmail), gets a minute, like his chat; he keeps waving or holding
+      // the letter after it tucks away, so you still know something's waiting.
+      timeout(m.kind === 'needs' ? 60 : m.jump ? 30 : m.kind === 'done' ? 14 : 6);
     },
     chat(focus = true) { clearTimeout(ttlTimer); $('card').className = ''; mode('chat'); scrollDown(); if (focus) setTimeout(() => $('input').focus(), 30); },
     thinking(q) { turns.push({ you: q, fox: '' }); addYou(q); pending(); setBusy(true); mode('chat'); scrollDown(); },
