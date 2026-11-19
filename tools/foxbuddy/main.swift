@@ -1315,10 +1315,25 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
     }
 
+    /// Tell him where the pointer is, relative to his head, whenever it moves. desktop.js only looks when
+    /// he's awake with nothing to do. Direction is -1..1 each way (up negative), and shrinks as the pointer
+    /// gets close, so a pointer right beside him gets a small glance, not eyes rolled to the edge.
+    var lastPointer = NSPoint(x: -1e6, y: -1e6)
+    func followPointer(_ p: NSPoint, _ f: NSRect) {
+        guard abs(p.x - lastPointer.x) + abs(p.y - lastPointer.y) > 3 else { return }
+        lastPointer = p
+        let head = NSPoint(x: f.midX, y: f.maxY - f.height * 0.45)
+        let dx = Double(p.x - head.x), dy = Double(head.y - p.y), len = max(1, (dx * dx + dy * dy).squareRoot())
+        let reach = min(1, len / 220)
+        let gx = (dx / len * reach * 100).rounded() / 100, gy = (dy / len * reach * 100).rounded() / 100
+        js("desk.follow(\(gx), \(gy))")
+    }
+
     func hover() {
         guard let panel = panel, panel.isVisible, ready else { return }
         if grab.dragging { panel.ignoresMouseEvents = false; restingOnHim(false); return }
         let p = NSEvent.mouseLocation, f = panel.frame
+        followPointer(p, f)
         guard f.contains(p) else { if !panel.ignoresMouseEvents { panel.ignoresMouseEvents = true }; restingOnHim(false); return }
         let x = p.x - f.minX, y = f.maxY - p.y
         web.evaluateJavaScript("desk.hit(\(x), \(y))") { [weak self] r, _ in

@@ -248,11 +248,25 @@
     if (!wake()) wakeUntil = Math.max(wakeUntil, now + WAKE_MS);     // (already up: stays up while you type)
     if (curMood === 'idle' && cur.kind === 'loop' && target === 'idle') want(asked);  // dozing in idle: wake() handled it
   }
+  // Awake with nothing to do, his eyes follow your pointer around the screen (the app sends where it is,
+  // gx, gy about -1..1 from his head, a few times a second while it moves). It never wakes him or keeps
+  // him up; a few seconds after the pointer stops, he goes back to looking around on his own.
+  const FOLLOW_MS = 4000;
+  let followAt = -1e9, followTo = [0, 0];
+  function follow(gx, gy) {
+    followTo = [Math.max(-1, Math.min(1, +gx || 0)), Math.max(-1, Math.min(1, +gy || 0))];
+    followAt = millis();
+  }
+  let gazeDir = [0, -1];                // where he's actually looking: eases toward the target, so a
+                                        // pointer update a few times a second still reads as a smooth glance
   function gazeNow(now) {
-    const on = now - watchAt < WATCH_MS && cur.kind === 'loop' && curMood !== 'night' ? 1 : 0;
+    const typing = now - watchAt < WATCH_MS && cur.kind === 'loop' && curMood !== 'night';
+    const following = !typing && now - followAt < FOLLOW_MS && cur.kind === 'loop' && curMood === 'awake' && !holdMood;
+    const on = typing || following ? 1 : 0, to = typing ? gaze : followTo;
+    if (on) gazeDir = gazeDir.map((v, i) => v + (to[i] - v) * 0.25);
     gazeAmt += (on - gazeAmt) * (on ? 0.22 : 0.1);
     if (Math.abs(on - gazeAmt) < 0.01) gazeAmt = on;
-    return gazeAmt > 0.01 ? [gaze[0], gaze[1], gazeAmt] : null;
+    return gazeAmt > 0.01 ? [gazeDir[0], gazeDir[1], gazeAmt] : null;
   }
 
   // ---------- drawing ----------
@@ -343,7 +357,7 @@
     canvas.style.opacity = dimNow.toFixed(3);
     const ov = offlineMark(now) || ovWorking || ovWaiting || ovUnseen;
     const g = gazeNow(now);
-    const key = `${cur.key}|${tick}|${hex(tintNow)}|${look}|${ov ? Math.floor(now / 100) : ''}|${g ? g[2].toFixed(2) : ''}`;
+    const key = `${cur.key}|${tick}|${hex(tintNow)}|${look}|${ov ? Math.floor(now / 100) : ''}|${g ? g.map(v => v.toFixed(2)).join(',') : ''}`;
     if (key === lastKey) return;
     lastKey = key;
     L.setTint(hex(tintNow)); L.setLine(look === 'ink' ? 'paper' : 'glow');
@@ -381,7 +395,7 @@
   }
 
   window.desk = {
-    line, tap, wake, watch, hold, setLook, said, hit, act: setAct, present: setPresent,
+    line, tap, wake, watch, follow, hold, setLook, said, hit, act: setAct, present: setPresent,
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
     state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, act, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
     // for tests: jump the clock forward
