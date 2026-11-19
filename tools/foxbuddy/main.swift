@@ -1896,7 +1896,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         bubble.makeFirstResponder(bubbleWeb)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             if !NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil) {
-                self.bubbleJS("bubble.info(\(jsonLiteral("Press your Dictation key (the microphone key, or Fn twice) and talk. If it's off, turn it on in System Settings › Keyboard › Dictation.")))")
+                self.bubbleJS("bubble.info(\(self.jsonLiteral("Press your Dictation key (the microphone key, or Fn twice) and talk. If it's off, turn it on in System Settings › Keyboard › Dictation.")))")
             }
         }
     }

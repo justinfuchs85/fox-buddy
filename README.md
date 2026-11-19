@@ -18,7 +18,11 @@ justinfuchs85/fox-buddy/fox-buddy`. His chat needs Claude Pro or Max; he install
   working, waiting on you, or done.
 - **Talks in a speech bubble**: "Running `npm test`", "needs your permission to use Bash", "done: …".
   **Show me** brings that session forward: the terminal, the browser tab or the Claude app.
-- **Chats and helps**: double-click him to ask a question. He can find files by name in Desktop,
+- **Chats and helps**: press **⌥ Space** from any app (Setup › Keyboard Shortcut to change it), or
+  double-click him, to ask a question; the mic button dictates. **Drop files on him** (PDFs, documents,
+  screenshots) to ask about them: he can open just those, in that chat. Dropped text lands in the message
+  box, ready for "tighten this". He reads **Reminders, Notes and your Shortcuts list** too, and adds a
+  reminder, makes a note or runs a shortcut only after you approve it. He can find files by name in Desktop,
   Documents and Downloads (and open them if you let him), read your Gmail and Google Calendar, search
   the web, check your iPhone activity summary, and use tools of your own that you plug in. He changes your calendar or writes a Gmail draft
   only after you click **Yes, do it** on a card showing exactly what he'll do, and never sends email. A

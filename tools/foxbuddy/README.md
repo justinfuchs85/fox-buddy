@@ -136,12 +136,14 @@ hooks off (`disableAllHooks`), he won't chat until you remove that setting.
 |---|---|---|
 | Find files | His own tool (`foxtools.py`) searches by name in Desktop, Documents and Downloads | Names, sizes and dates only. Each file he mentions gets a **Show in Finder** button. |
 | Open files | Claude Code's `Read`, limited to the same folders | Off until you click **Files: names only** under the chat (it turns to **Files: can open**). Lasts for that chat only. |
+| Open files you drop on him | Claude Code's `Read`, for exactly those files (the gate allows each file, not its folder) | That chat only: **New chat**, or the × on a file's chip, takes it away. A picture dragged from a web page is saved in `~/.desk-buddy/drops` first, cleared at launch. |
+| Read Reminders, Notes and Shortcuts | His own tools, through `osascript` and Apple's `shortcuts` command | macOS asks once for each app. Off: Setup › Use Reminders, Notes & Shortcuts. Locked notes stay locked. |
 | Check your activity | His own tool reads the summary your iPhone saves ([Activity updates](#activity-updates)) | That one folder |
 | Use your own tools | Local tool servers you add in `~/.desk-buddy/fox-tools.json` ([Extra tools](#extra-tools)) | Only the tools you list; read-only |
 | Search the web | Claude Code's `WebSearch` | He's told never to put your private details in a search |
 | Read Gmail | Your claude.ai Gmail connector: search, threads, messages, drafts | Can't send, reply, forward, trash or relabel: those tools are removed |
 | Read Google Calendar | Your claude.ai Google Calendar connector: calendars, events, free time | |
-| Change your calendar, write Gmail drafts | Only after you approve | See below |
+| Change your calendar, write Gmail drafts, add or complete a reminder, make a note, run a shortcut | Only after you approve | See below. A shortcut can do anything it's built to do, so its card says so. |
 | Remember things about you | Adds a line to his notes | Only after you click **Save it** |
 
 **Changes need your OK, one exact call at a time.** When you ask for a change ("move my dentist
