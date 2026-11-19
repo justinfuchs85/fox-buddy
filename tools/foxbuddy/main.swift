@@ -746,10 +746,18 @@ final class Asker {
         \(Asker.connectorLine(setup.gmailState, "Gmail", "search and read email", "email"))
         \(Asker.connectorLine(setup.calendarState, "Google Calendar", "see calendars, events and free time", "the calendar"))
         Those are the only apps you can use. The user may have other apps connected to Claude (Figma, Slack, Notion, Google Drive \
-        and so on), but they aren't yours, even if their tools show up. When a request needs one (making a design in Figma, say), \
-        don't try it: say in one line that you can't use that app from here, do what you can in the chat, and point them to \
-        Open in Claude under the chat, which moves the conversation to Claude, where it can. Never say an app disconnected \
-        or failed when a tool call was refused: a refusal means it isn't one of your tools.
+        and so on), but they aren't yours, even if their tools show up: don't try them. Never say an app disconnected or failed \
+        when a tool call was refused: a refusal means it isn't one of your tools.
+
+        Handing off. You're for quick questions, look-ups and small changes. When a request needs what you can't do, or is \
+        too big for a speech bubble, don't attempt a weak version: say in one short line why it's a job for Claude, and end your \
+        reply with exactly one of these lines, which becomes a button that moves the whole conversation over:
+        - [[handoff claude]] for the Claude app (or claude.ai): another connected app (Figma, Slack, Notion, Drive...), making \
+        a design, document, slide deck, spreadsheet, chart or long piece of writing, deep research, or anything long.
+        - [[handoff code: <absolute folder path, or ~>]] for Claude Code in Terminal: writing, running or fixing code in a project, \
+        editing, moving, renaming or organizing files, or running commands. Use the project's folder if you know it (find it \
+        with find_files), otherwise ~.
+        Answer what you can first when it helps (a quick outline, a one-line answer). Don't hand off what you can do yourself.
         You can't run commands, and you can't change, move or delete files.
         If a tool fails or isn't there, never pass on a raw error message: say in one plain sentence what didn't work and what the user can do about it.
 
@@ -2489,6 +2497,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             if u == "download" { installUpdate() }
             if u == "notes", let rel = updateOffer { NSWorkspace.shared.open(rel.page) }
         }
+        if let h = body["handoffCode"] as? [String: Any], let text = h["text"] as? String, !text.isEmpty {
+            handoffToCode(text, folder: h["dir"] as? String ?? "")
+        }
         if let q = body["open"] as? String, !q.isEmpty {
             asker.cancel()                                // any reply still on its way: Claude Desktop has it now
             bubbleJS("bubble.stopped('Carried on in Claude Desktop.')")
@@ -2658,6 +2669,35 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     /// A new chat in Claude Desktop with the question filled in, for you to check and send (claude://claude.ai/new?q=…).
     /// Without Claude Desktop, the same in claude.ai in your browser.
+    /// "Continue in Claude Code": a Terminal window running Claude Code in the folder he named (inside your home
+    /// folder, or your home folder itself), with the conversation so far as its first message. It's your own Claude
+    /// Code, with its usual permission prompts: none of his limits apply there, which is the point.
+    func handoffToCode(_ text: String, folder: String) {
+        guard let claude = Asker.findClaude() else {
+            _ = alert("Claude Code isn't installed", "Set it up first: right-click me › Setup › Set Up Fox Buddy…"); return
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        var dir = folder.hasPrefix("~") ? home + folder.dropFirst() : folder
+        dir = URL(fileURLWithPath: dir).resolvingSymlinksInPath().standardizedFileURL.path
+        var isDir: ObjCBool = false
+        if folder.isEmpty || !(dir == home || dir.hasPrefix(home + "/")) || !FileManager.default.fileExists(atPath: dir, isDirectory: &isDir) || !isDir.boolValue {
+            dir = home
+        }
+        Setup.ensureRuntime()
+        let stamp = UUID().uuidString.lowercased().prefix(8)
+        let prompt = Setup.runtime.appendingPathComponent("handoff-\(stamp).txt"), f = Setup.runtime.appendingPathComponent("handoff-\(stamp).command")
+        guard FileManager.default.createFile(atPath: prompt.path, contents: Data(String(text.prefix(60000)).utf8), attributes: [.posixPermissions: 0o600]) else { return }
+        let q = { (s: String) in "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        var script = "#!/bin/zsh\nclear\n"
+        if let certs = Asker.findCompanyCertificates() { script += "export NODE_EXTRA_CA_CERTS=\(q(certs))\n" }
+        script += "cd \(q(dir)) || exit 1\n"
+        script += "P=\"$(cat \(q(prompt.path)))\"; rm -f \(q(prompt.path)) \"$0\"\n"
+        script += "exec \(q(claude)) \"$P\"\n"
+        try? script.write(to: f, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: f.path)
+        NSWorkspace.shared.open(f)
+    }
+
     func openInClaude(_ question: String) {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: "&+=?#")
