@@ -73,8 +73,17 @@ git pull && git tag v1.0.4 && git push origin v1.0.4
 
 About 10 minutes later the release is on the Releases page with `Fox-Buddy-1.0.0.dmg`, `.zip`, `Fox-Buddy.dmg`
 (the same DMG under a name that never changes, for links) and `appcast.xml`. The workflow then points the
-Homebrew cask (`Casks/fox-buddy.rb`) at the new version, in a commit of its own on `main`. For a test
-build without a release: Actions › Release › Run workflow (the files are on the run's page, under Artifacts).
+Homebrew cask (`Casks/fox-buddy.rb`) at the new version, in a commit of its own on `main`.
+
+### From a browser (no Terminal)
+
+On GitHub: **Actions › Release › Run workflow**. Leave *Use workflow from* on `main`, type `ship` in the
+confirm box, and leave the version box empty for the next small version (or type `minor`, `major` or `1.2.3`).
+Click **Run workflow**. It runs the same build, and only once everything has passed does it make the tag and
+the release, so a failed build leaves nothing behind. It ships whatever is on `main` at that moment.
+
+Run it with the confirm box empty for a test build without a release (the files are on the run's page, under
+Artifacts).
 
 Mac runners count 10× against GitHub's free Actions minutes on a private repo (2,000 a month on the free plan,
 so about 200 Mac minutes): a release takes roughly 10 to 15 of those.
