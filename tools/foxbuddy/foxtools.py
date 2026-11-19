@@ -191,6 +191,11 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "query": {"type": "string"}, "folder": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
          "additionalProperties": False}},
+    {"name": "about_fox_buddy",
+     "description": "Fox Buddy's guide to himself: what he can and can't do, how to set things up or switch them off, "
+                    "every menu, privacy, and fixes for common problems, plus the user's current settings on this Mac. "
+                    "Call it before answering any question about Fox Buddy itself, and answer from it.",
+     "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}}, "additionalProperties": False}},
     {"name": "activity",
      "description": "Read the user's recent activity summary (steps, workouts, active calories and so on) that their "
                     "iPhone saves each day. Use it for questions about their exercise or activity.",
@@ -445,6 +450,26 @@ def gate(policy_path, stdin):
     return True, ""
 
 
+def about(guide, settings):
+    """The guide (fox-guide.md, in the app next to this file) and the settings the app wrote just before this
+    question (settings-now.txt). Both are the app's own files; either may be missing on an odd install."""
+    parts = []
+    try:
+        with open(guide, encoding="utf-8") as f:
+            parts.append(f.read(60000).strip())
+    except (OSError, TypeError):
+        parts.append("(Fox Buddy's guide is missing from this copy of the app. Say you're not sure, and suggest "
+                     "Setup › Report a Problem… or the README at https://github.com/justinfuchs85/fox-buddy.)")
+    try:
+        with open(settings, encoding="utf-8") as f:
+            now = f.read(8000).strip()
+        if now:
+            parts.append("## The user's current settings on this Mac\n\n" + now)
+    except (OSError, TypeError):
+        pass
+    return "\n\n".join(parts)
+
+
 def main(argv):
     if len(argv) == 2 and argv[0] == "--gate":
         raw = sys.stdin.read()
@@ -456,7 +481,7 @@ def main(argv):
         if not ok:
             sys.stderr.write(why + "\n")
         sys.exit(0 if ok else 2)                                  # exit 2: Claude Code blocks the call and tells him why
-    roots, dirs, apple = [], [], False
+    roots, dirs, apple, guide, settings = [], [], False, None, None
     it = iter(argv)
     for a in it:
         if a == "--folder":
@@ -467,6 +492,10 @@ def main(argv):
             dirs.append(real(next(it, "")))
         elif a == "--apple":
             apple = True
+        elif a == "--guide":
+            guide = next(it, None)
+        elif a == "--settings":
+            settings = next(it, None)
     out = sys.stdout
 
     def send(msg):
@@ -496,6 +525,8 @@ def main(argv):
                     text = find_files(args, roots) if roots else "The user hasn't allowed any folders."
                 elif name == "activity":
                     text = activity(args, dirs)
+                elif name == "about_fox_buddy":
+                    text = about(guide, settings)
                 elif apple and name in APPLE_READ + APPLE_CHANGE:
                     text = apple_tool(name, args)
                 else:

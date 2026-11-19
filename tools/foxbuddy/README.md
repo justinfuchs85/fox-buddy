@@ -143,6 +143,7 @@ hooks off (`disableAllHooks`), he won't chat until you remove that setting.
 | Read Reminders, Notes and Shortcuts | His own tools, through `osascript` and Apple's `shortcuts` command | macOS asks once for each app. Off: Setup › Use Reminders, Notes & Shortcuts. Locked notes stay locked. |
 | Check your activity | His own tool reads the summary your iPhone saves ([Activity updates](#activity-updates)) | That one folder |
 | Use your own tools | Local tool servers you add in `~/.desk-buddy/fox-tools.json` ([Extra tools](#extra-tools)) | Only the tools you list; read-only |
+| Answer questions about himself | His own tool, `about_fox_buddy`, returns his guide ([`fox-guide.md`](fox-guide.md)) and your current settings, written by the app to `~/.desk-buddy/settings-now.txt` before each question | When you add or change a feature or a menu item, update `fox-guide.md` too: a test fails if a menu item isn't in it. |
 | Search the web | Claude Code's `WebSearch` | He's told never to put your private details in a search |
 | Read Gmail | Your claude.ai Gmail connector: search, threads, messages, drafts | Can't send, reply, forward, trash or relabel: those tools are removed |
 | Read Google Calendar | Your claude.ai Google Calendar connector: calendars, events, free time | |

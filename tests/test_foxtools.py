@@ -1,5 +1,5 @@
 """The fox's own tools (tools/foxbuddy/foxtools.py): names only, and only inside the allowed folders."""
-import json, os, subprocess, sys, tempfile, unittest
+import json, os, re, subprocess, sys, tempfile, unittest
 
 TOOLS = os.path.join(os.path.dirname(__file__), "..", "tools", "foxbuddy", "foxtools.py")
 
@@ -55,3 +55,50 @@ class FoxTools(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+GUIDE = os.path.join(os.path.dirname(__file__), "..", "tools", "foxbuddy", "fox-guide.md")
+SWIFT = os.path.join(os.path.dirname(__file__), "..", "tools", "foxbuddy", "main.swift")
+
+
+class AboutFoxBuddy(unittest.TestCase):
+    """His guide to himself: the about_fox_buddy tool, and that the guide keeps up with the app."""
+
+    def ask(self, *extra):
+        msgs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}},
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "about_fox_buddy", "arguments": {"question": "can you send email?"}}}]
+        out = subprocess.run([sys.executable, TOOLS, *extra], input="\n".join(map(json.dumps, msgs)) + "\n",
+                             capture_output=True, text=True, timeout=20).stdout
+        replies = [json.loads(l) for l in out.splitlines()]
+        return [t["name"] for t in replies[1]["result"]["tools"]], replies[2]["result"]["content"][0]["text"]
+
+    def test_answers_with_the_guide_and_current_settings(self):
+        d = tempfile.mkdtemp()
+        settings = os.path.join(d, "settings-now.txt")
+        with open(settings, "w") as f:
+            f.write("Keyboard shortcut: ⌃⌥ F\nEnd-of-day wrap-up: off")
+        names, text = self.ask("--guide", GUIDE, "--settings", settings)
+        self.assertIn("about_fox_buddy", names)
+        self.assertIn("## What you can't do", text)
+        self.assertIn("Send email", text)
+        self.assertIn("## The user's current settings on this Mac", text)
+        self.assertIn("Keyboard shortcut: ⌃⌥ F", text)
+
+    def test_says_so_when_the_guide_is_missing(self):
+        _, text = self.ask("--guide", "/nonexistent/fox-guide.md")
+        self.assertIn("guide is missing", text)
+        self.assertNotIn("current settings", text)
+
+    def test_the_guide_names_every_menu_item(self):
+        """Every fixed menu title in the app is in the guide, so a new menu item can't ship without him knowing it."""
+        swift = open(SWIFT, encoding="utf-8").read()
+        menu = swift[swift.index("    func menu() -> NSMenu {"):swift.index("    @objc func tapNow()")]
+        menu += swift[swift.index("    func meetingItems()"):swift.index("    @objc func toggleMeetingPrep()")]
+        menu += swift[swift.index("    func emailAlertItems()"):swift.index("    @objc func removeEmailAlert")]
+        titles = set(re.findall(r'(?:item|sub)\("([^"\\]+)"', menu))
+        titles -= {"Off", "Tap", "Hide (Open Fox Buddy Again to Bring Him Back)", "No alerts yet",
+                   "Ask a Question… (or Double-Click Him)"}                       # named differently, or nothing to explain
+        guide = " ".join(open(GUIDE, encoding="utf-8").read().split())
+        missing = sorted(t for t in titles if t not in guide)
+        self.assertEqual(missing, [], "add these menu items to tools/foxbuddy/fox-guide.md")
