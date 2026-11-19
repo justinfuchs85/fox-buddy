@@ -148,6 +148,22 @@
   #wDots { display: flex; gap: 5px; justify-content: center; margin-top: 10px; }
   #wDots span { width: 6px; height: 6px; border-radius: 3px; background: var(--line); transition: width .2s ease; }
   #wDots span.on { width: 16px; background: var(--fox); }
+  /* things you dropped on him, for this chat */
+  #attached { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
+  .att { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: 1.5px solid var(--line); border-radius: 999px;
+         padding: 2px 4px 2px 9px; font: 600 11.5px/1.3 var(--round); color: var(--ink); background: var(--wash); }
+  .att .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
+  .att .nm::before { content: "📎 "; }
+  .att button { border: 0; background: none; color: var(--muted); font: 700 13px/1 var(--round); cursor: pointer; padding: 0 3px; border-radius: 50%; }
+  .att button:hover { color: var(--ink); background: var(--line); }
+  #dropHint { display: none; position: absolute; inset: 6px; border: 2px dashed var(--fox); border-radius: 13px; align-items: center; justify-content: center;
+              background: color-mix(in srgb, var(--paper) 88%, transparent); font: 800 15px/1.2 var(--round); color: var(--fox-deep); z-index: 3; pointer-events: none; }
+  #card.dropping #dropHint { display: flex; }
+  @media (prefers-color-scheme: dark) { #dropHint { color: var(--fox); } }
+  button.mic { border: 1.5px solid var(--line); background: none; color: var(--muted); width: 30px; height: 28px; border-radius: 10px 9px 11px 9px;
+               display: grid; place-items: center; cursor: pointer; padding: 0; }
+  button.mic:hover { color: var(--ink); background: var(--wash); }
+  button.mic.on { color: var(--on-fox); background: var(--fox); border-color: var(--edge); }
   [hidden] { display: none !important; }
 </style></head>
 <body>
@@ -171,11 +187,14 @@
         <button class="link" id="openClaude" title="Carry this conversation into a new Claude Desktop chat (⌘-Return)">Open in Claude</button>
       </div>
       <div id="thread"></div>
+      <div id="dropHint" aria-hidden="true">Drop it on me: I'll have a look</div>
       <div id="composer">
-        <textarea id="input" placeholder="Ask the fox anything…" rows="2"></textarea>
+        <div id="attached" hidden></div>
+        <textarea id="input" placeholder="Ask the fox anything, or drop a file on me…" rows="2"></textarea>
         <div class="row">
           <button class="chip" id="files" title="Let him read inside files in the folders he can search, for this chat only">Files: names only</button>
           <span class="spacer"></span>
+          <button class="mic" id="mic" title="Dictate instead of typing (macOS Dictation)" aria-label="Dictate"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="7" y="2" width="6" height="10" rx="3" fill="currentColor"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           <button class="act primary" id="send" title="Return sends. ⌘-Return opens this in Claude instead.">Send</button>
         </div>
       </div>
@@ -310,14 +329,37 @@
       d.querySelector('.notes').onclick = () => post({ update: 'notes' });
       d.querySelector('.later').onclick = () => post({ action: 'dismiss' });
       scrollDown(); report(); },
+    // files dropped on him: chips you can take off again
+    attached(list) {
+      const box = $('attached'); box.innerHTML = '';
+      for (const f of list || []) {
+        const c = document.createElement('span'); c.className = 'att'; c.title = f.path;
+        c.innerHTML = '<span class="nm"></span><button aria-label="Remove">×</button>';
+        c.querySelector('.nm').textContent = f.name;
+        c.querySelector('button').onclick = () => post({ detach: f.path });
+        box.appendChild(c);
+      }
+      box.hidden = !(list && list.length);
+      if (list && list.length && !$('input').value) $('input').placeholder = list.length === 1 ? 'What should I do with it?' : 'What should I do with these?';
+      else if (!list || !list.length) $('input').placeholder = 'Ask the fox anything, or drop a file on me…';
+      setTimeout(() => $('input').focus(), 30); report();
+    },
+    dragOver(on) { $('card').classList.toggle('dropping', !!on); },
+    insertText(t) {                                   // dropped text: quoted into the message box, ready for "tighten this"
+      const i = $('input'), q = String(t).trim().split('\n').map(l => '> ' + l).join('\n');
+      i.value = (i.value ? i.value.trimEnd() + '\n\n' : '') + q + '\n\n';
+      i.dispatchEvent(new Event('input')); i.focus(); i.setSelectionRange(i.value.length, i.value.length); report();
+    },
+    dictating(on) { $('mic').classList.toggle('on', !!on); },
     shown() { tucked = false; lastActive = Date.now(); },
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };
   const CALENDAR_TOOLS = ['create_event', 'update_event', 'delete_event', 'respond_to_event'], GMAIL_TOOLS = ['create_draft', 'update_draft'];
+  const APPLE_TOOLS = { reminders_add: 'Reminders', reminders_complete: 'Reminders', notes_create: 'Notes', shortcuts_run: 'Shortcut' };
   // {tool, summary, input} from a fox-confirm block, or null if it isn't one of the change tools with an arguments object.
   function proposal(body) {
     let p; try { p = JSON.parse(body); } catch (e) { return null; }
-    if (!p || typeof p !== 'object' || ![...CALENDAR_TOOLS, ...GMAIL_TOOLS].includes(p.tool)) return null;
+    if (!p || typeof p !== 'object' || ![...CALENDAR_TOOLS, ...GMAIL_TOOLS, ...Object.keys(APPLE_TOOLS)].includes(p.tool)) return null;
     if (!p.input || typeof p.input !== 'object' || Array.isArray(p.input) || typeof p.summary !== 'string' || !p.summary.trim()) return null;
     return { tool: p.tool, summary: p.summary.trim().slice(0, 500), input: p.input };
   }
@@ -328,14 +370,16 @@
   function confirmCard(d, ask) {
     settleAll('Not done.');
     const local = ask.kind === 'remember' || ask.kind === 'forget';        // his notes: the app does it, no reply needed
-    const calendar = CALENDAR_TOOLS.includes(ask.tool);
+    const calendar = CALENDAR_TOOLS.includes(ask.tool), apple = APPLE_TOOLS[ask.tool];
     const emails = local ? [] : [...new Set(JSON.stringify(ask.input).match(EMAIL) || [])];
     const warn = local ? ''
       : calendar && emails.length && ask.tool !== 'delete_event' ? `<div class="warn">Google Calendar may email: ${esc(emails.join(', '))}</div>`
+      : ask.tool === 'shortcuts_run' ? '<div class="warn">A shortcut can do anything it\'s built to do. Only run ones you know.</div>'
+      : apple ? ''
       : !calendar ? '<div class="note">Saved as a draft in Gmail. Nothing is sent.</div>' : '';
     const rows = Object.entries(ask.input || {}).map(([k, v]) => `<div><span class="k">${esc(k)}</span> ${esc(shown(v))}</div>`).join('');
     const card = document.createElement('div'); card.className = 'confirm live';
-    const label = local ? (ask.kind === 'remember' ? 'Remember' : 'Forget') : calendar ? 'Calendar' : 'Gmail draft';
+    const label = local ? (ask.kind === 'remember' ? 'Remember' : 'Forget') : calendar ? 'Calendar' : apple || 'Gmail draft';
     card.innerHTML = `<div class="what">${label}: ${esc(ask.summary)}</div>` + warn +
       (local ? '' : `<details class="args" open><summary>Exactly what he'll do (${esc(ask.tool)})</summary>${rows || '<div>(no arguments)</div>'}</details>`) +
       `<div class="actions"><button class="act primary yes">${local ? (ask.kind === 'remember' ? 'Save it' : 'Forget it') : 'Yes, do it'}</button><button class="act no">No</button></div><div class="result" hidden></div>`;
@@ -421,6 +465,7 @@
   });
   let typedAt = 0;                                   // he watches you type (the app turns him toward the bubble)
   $('input').addEventListener('keydown', () => { const t = Date.now(); if (t - typedAt > 300) { typedAt = t; post({ typing: true }); } });
+  $('mic').onclick = () => { $('input').focus(); post({ dictate: true }); };
   $('input').addEventListener('input', () => { const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight + 2) + 'px'; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') post({ action: 'dismiss' }); });
   mode('say');

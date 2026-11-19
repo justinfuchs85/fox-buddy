@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """The fox's own tools: a tiny MCP server (stdio, standard library only) that Claude Code starts for
-each of his chats. It can't change anything.
+each of his chats. On its own it changes nothing: the few tools that can (Reminders, Notes, Shortcuts) only
+run once you approve that exact call.
 
   find_files   finds files and folders BY NAME in the folders you allowed (--folder, repeatable) and
                returns their paths, sizes and dates. It never opens a file: whether he may read inside
                one is a separate switch in his chat, enforced by Claude Code itself.
   activity     reads the activity summary your iPhone Shortcut saves (--activity-dir, repeatable):
                steps, workouts and the like. Only the files in that folder.
+  Reminders, Notes and Shortcuts (--apple): reading lists, reminders, notes and shortcut names; and, only
+               after you approve the exact call on a card (the gate enforces it), adding or completing a
+               reminder, making a note, or running a shortcut.
 
 Run by the app (tools/foxbuddy/main.swift) as:
   python3 foxtools.py --folder ~/Desktop --folder ~/Documents --activity-dir "~/Library/Mobile Documents/..."
@@ -194,6 +198,185 @@ TOOLS = [
 ]
 
 
+# ---------- Reminders, Notes and Shortcuts (--apple): macOS asks you once to allow each app ----------
+# They run through osascript (JavaScript for Automation) and Apple's `shortcuts` command. The read tools are
+# his to use; the change tools (reminders_add, reminders_complete, notes_create, shortcuts_run) are refused by
+# the gate unless you approved that exact call on a card.
+
+JXA_REMINDERS = r"""
+function run(argv) {
+  const a = JSON.parse(argv[0]), R = Application('Reminders');
+  const iso = d => (d ? d.toISOString() : null);
+  const item = (r, l) => ({ id: r.id(), name: r.name(), list: l, due: iso(r.dueDate()), notes: (r.body() || '').slice(0, 300), flagged: r.flagged() });
+  if (a.op === 'lists') return JSON.stringify(R.lists().map(l => ({ name: l.name(), open: l.reminders.whose({ completed: false })().length })));
+  if (a.op === 'list') {
+    const lists = a.list ? [R.lists.byName(a.list)] : R.lists(), out = [];
+    for (const l of lists) {
+      const name = l.name();
+      for (const r of l.reminders.whose({ completed: false })()) { out.push(item(r, name)); if (out.length >= a.limit) return JSON.stringify(out); }
+    }
+    return JSON.stringify(out);
+  }
+  if (a.op === 'add') {
+    const l = a.list ? R.lists.byName(a.list) : R.defaultList(), props = { name: a.title };
+    if (a.notes) props.body = a.notes;
+    if (a.due) props.dueDate = new Date(a.due);
+    const r = R.Reminder(props); l.reminders.push(r);
+    return JSON.stringify({ added: r.name(), list: l.name(), due: iso(r.dueDate()) });
+  }
+  if (a.op === 'complete') { const r = R.reminders.byId(a.id); r.completed = true; return JSON.stringify({ completed: r.name() }); }
+  throw new Error('unknown op');
+}
+"""
+
+JXA_NOTES = r"""
+function run(argv) {
+  const a = JSON.parse(argv[0]), N = Application('Notes');
+  const meta = n => { let f = ''; try { f = n.container().name(); } catch (e) {} return { id: n.id(), name: n.name(), folder: f, modified: n.modificationDate().toISOString() }; };
+  if (a.op === 'search') {
+    const q = a.query || '';
+    const found = q ? N.notes.whose({ _or: [{ name: { _contains: q } }, { plaintext: { _contains: q } }] })() : N.notes();
+    return JSON.stringify(found.slice(0, a.limit).map(meta));
+  }
+  if (a.op === 'read') { const n = N.notes.byId(a.id); return JSON.stringify(Object.assign(meta(n), { text: n.plaintext().slice(0, 8000) })); }
+  if (a.op === 'create') {
+    const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = '<h1>' + esc(a.title) + '</h1>' + esc(a.body || '').split('\n').map(l => '<div>' + (l || '<br>') + '</div>').join('');
+    const folder = a.folder ? N.folders.byName(a.folder) : N.defaultAccount().defaultFolder();
+    const n = N.Note({ body: html }); folder.notes.push(n);
+    return JSON.stringify({ created: a.title, folder: folder.name() });
+  }
+  throw new Error('unknown op');
+}
+"""
+
+APPLE_TIMEOUT = 45
+
+
+def jxa(script, args, app):
+    try:
+        r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", script, json.dumps(args)],
+                           capture_output=True, text=True, timeout=APPLE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise ValueError(f"{app} took too long to answer. If macOS is asking whether to allow access to {app}, say OK and try again.")
+    if r.returncode != 0:
+        err = (r.stderr or "").strip()
+        if "-1743" in err or "Not authorized" in err:
+            raise ValueError(f"macOS hasn't allowed Fox Buddy to use {app}. Turn it on in System Settings › Privacy & Security › "
+                             f"Automation (under Fox Buddy), then try again.")
+        if "-1728" in err or "Can't get" in err:
+            raise ValueError(f"{app} couldn't find that (check the name or id).")
+        raise ValueError(f"{app} said: {err[-300:] or 'an error'}")
+    return json.loads(r.stdout or "null")
+
+
+def clamp(n, lo, hi, default):
+    try:
+        return max(lo, min(hi, int(n)))
+    except (TypeError, ValueError):
+        return default
+
+
+def apple_tool(name, args):
+    a = dict(args or {})
+    if name == "reminders_lists":
+        lists = jxa(JXA_REMINDERS, {"op": "lists"}, "Reminders")
+        return "\n".join(f"- {l['name']} ({l['open']} open)" for l in lists) or "No reminder lists."
+    if name == "reminders_list":
+        items = jxa(JXA_REMINDERS, {"op": "list", "list": a.get("list") or None, "limit": clamp(a.get("limit"), 1, 100, 40)}, "Reminders")
+        if not items:
+            return "No open reminders" + (f" in {a['list']}." if a.get("list") else ".")
+        return json.dumps(items, indent=1)
+    if name == "reminders_add":
+        if not str(a.get("title") or "").strip():
+            raise ValueError("a reminder needs a title")
+        return json.dumps(jxa(JXA_REMINDERS, {"op": "add", "title": str(a["title"]).strip(), "list": a.get("list") or None,
+                                              "due": a.get("due") or None, "notes": a.get("notes") or None}, "Reminders"))
+    if name == "reminders_complete":
+        if not a.get("id"):
+            raise ValueError("which reminder? (its id, from reminders_list)")
+        return json.dumps(jxa(JXA_REMINDERS, {"op": "complete", "id": str(a["id"])}, "Reminders"))
+    if name == "notes_search":
+        found = jxa(JXA_NOTES, {"op": "search", "query": str(a.get("query") or ""), "limit": clamp(a.get("limit"), 1, 50, 20)}, "Notes")
+        return json.dumps(found, indent=1) if found else "No notes match."
+    if name == "notes_read":
+        if not a.get("id"):
+            raise ValueError("which note? (its id, from notes_search)")
+        return json.dumps(jxa(JXA_NOTES, {"op": "read", "id": str(a["id"])}, "Notes"), indent=1)
+    if name == "notes_create":
+        if not str(a.get("title") or "").strip():
+            raise ValueError("a note needs a title")
+        return json.dumps(jxa(JXA_NOTES, {"op": "create", "title": str(a["title"]).strip(), "body": str(a.get("body") or ""),
+                                          "folder": a.get("folder") or None}, "Notes"))
+    if name == "shortcuts_list":
+        r = subprocess.run(["/usr/bin/shortcuts", "list"], capture_output=True, text=True, timeout=APPLE_TIMEOUT)
+        names = [n for n in (r.stdout or "").splitlines() if n.strip()]
+        return "\n".join("- " + n for n in names[:200]) or "No shortcuts."
+    if name == "shortcuts_run":
+        sc = str(a.get("name") or "").strip()
+        if not sc:
+            raise ValueError("which shortcut? (its exact name, from shortcuts_list)")
+        import tempfile
+        work = tempfile.mkdtemp(prefix="fox-shortcut-")
+        cmd = ["/usr/bin/shortcuts", "run", sc, "--output-path", os.path.join(work, "out.txt"), "--output-type", "public.plain-text"]
+        if a.get("input"):
+            with open(os.path.join(work, "in.txt"), "w") as f:
+                f.write(str(a["input"]))
+            cmd += ["--input-path", os.path.join(work, "in.txt")]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            out = ""
+            if os.path.exists(os.path.join(work, "out.txt")):
+                with open(os.path.join(work, "out.txt"), errors="replace") as f:
+                    out = f.read().strip()
+        except subprocess.TimeoutExpired:
+            raise ValueError(f"\"{sc}\" was still running after 2 minutes, so I stopped waiting for it.")
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        if r.returncode != 0:
+            raise ValueError(f"\"{sc}\" didn't finish: {(r.stderr or '').strip()[-300:] or 'no reason given'}")
+        return f"Ran \"{sc}\"." + (f" It returned:\n{out[:4000]}" if out else "")
+    raise ValueError(f"no tool called {name}")
+
+
+APPLE_READ = ["reminders_lists", "reminders_list", "notes_search", "notes_read", "shortcuts_list"]
+APPLE_CHANGE = ["reminders_add", "reminders_complete", "notes_create", "shortcuts_run"]
+
+APPLE_TOOLS = [
+    {"name": "reminders_lists", "description": "The user's Reminders lists, with how many open reminders each has.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "reminders_list",
+     "description": "Open (not completed) reminders, from one list (its name) or all of them: id, name, list, due date, notes, flagged.",
+     "inputSchema": {"type": "object", "properties": {"list": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+                     "additionalProperties": False}},
+    {"name": "reminders_add",
+     "description": "CHANGE (needs the user's approval, as a fox-confirm block): add a reminder. title; list (a list's name; "
+                    "default list if left out); due (ISO 8601 date and time with the user's offset); notes.",
+     "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "list": {"type": "string"},
+                                                      "due": {"type": "string"}, "notes": {"type": "string"}},
+                     "required": ["title"], "additionalProperties": False}},
+    {"name": "reminders_complete", "description": "CHANGE (needs approval): mark a reminder done, by its id from reminders_list.",
+     "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"], "additionalProperties": False}},
+    {"name": "notes_search",
+     "description": "Find notes in Apple Notes whose title or text contains query (empty: the most recent). Returns id, title, folder, modified date.",
+     "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+                     "additionalProperties": False}},
+    {"name": "notes_read", "description": "Read one note's text (up to 8,000 characters), by its id from notes_search.",
+     "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"], "additionalProperties": False}},
+    {"name": "notes_create",
+     "description": "CHANGE (needs approval): make a new note in Apple Notes. title; body (plain text, new lines kept); folder (default folder if left out).",
+     "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}, "folder": {"type": "string"}},
+                     "required": ["title"], "additionalProperties": False}},
+    {"name": "shortcuts_list", "description": "The names of the user's Shortcuts.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "shortcuts_run",
+     "description": "CHANGE (needs approval): run one of the user's Shortcuts by its exact name, optionally with text input. "
+                    "Returns what the shortcut outputs. Shortcuts can do anything, so only run one the user asked for.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "input": {"type": "string"}},
+                     "required": ["name"], "additionalProperties": False}},
+]
+
+
 GATE_LOG = os.path.expanduser("~/.desk-buddy/gate.log")
 SAME_CALL_SECONDS = 20          # no tool_use_id to go by: an identical call this soon after is the same one, re-checked
 
@@ -273,7 +456,7 @@ def main(argv):
         if not ok:
             sys.stderr.write(why + "\n")
         sys.exit(0 if ok else 2)                                  # exit 2: Claude Code blocks the call and tells him why
-    roots, dirs = [], []
+    roots, dirs, apple = [], [], False
     it = iter(argv)
     for a in it:
         if a == "--folder":
@@ -282,6 +465,8 @@ def main(argv):
                 roots.append(p)
         elif a == "--activity-dir":
             dirs.append(real(next(it, "")))
+        elif a == "--apple":
+            apple = True
     out = sys.stdout
 
     def send(msg):
@@ -303,7 +488,7 @@ def main(argv):
                 "protocolVersion": params.get("protocolVersion") or "2025-06-18",
                 "capabilities": {"tools": {}}, "serverInfo": {"name": "fox", "version": "1.0"}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS + (APPLE_TOOLS if apple else [])}})
         elif method == "tools/call":
             name, args = params.get("name"), params.get("arguments") or {}
             try:
@@ -311,6 +496,8 @@ def main(argv):
                     text = find_files(args, roots) if roots else "The user hasn't allowed any folders."
                 elif name == "activity":
                     text = activity(args, dirs)
+                elif apple and name in APPLE_READ + APPLE_CHANGE:
+                    text = apple_tool(name, args)
                 else:
                     raise ValueError(f"no tool called {name}")
                 send({"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}})

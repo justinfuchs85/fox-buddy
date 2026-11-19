@@ -12,6 +12,7 @@
 // Clicks on the empty space around him go through to whatever is underneath.
 // Build and launch: zsh tools/foxbuddy/build.sh
 
+import Carbon.HIToolbox
 import Cocoa
 import Network
 import ServiceManagement
@@ -142,6 +143,10 @@ final class BoardLink {
 
 /// Sits on top of the web view and takes every click: a click is a tap, a drag moves him.
 final class GrabView: NSView {
+    var onDrop: ((NSPasteboard) -> Void)?
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { Drops.accepts(sender) ? .copy : [] }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { Drops.accepts(sender) ? .copy : [] }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { onDrop?(sender.draggingPasteboard); return true }
     var onTap: (() -> Void)?
     var onDoubleClick: (() -> Void)?
     var onMenu: ((NSEvent) -> Void)?
@@ -309,9 +314,64 @@ enum Setup {
 
 /// The bubble's own small window, beside him. Unlike his, it can take the keyboard (for typing a
 /// question) without making Fox Buddy the active app, like Spotlight's.
+/// A keyboard shortcut that works from any app: it opens his chat, or closes it again. Carbon's hot keys need
+/// no Accessibility permission. Registering fails if another app already has that combination.
+final class HotKey {
+    struct Choice { let id: String; let title: String; let key: UInt32; let mods: UInt32 }
+    static let choices: [Choice] = [
+        Choice(id: "opt-space", title: "⌥ Space", key: UInt32(kVK_Space), mods: UInt32(optionKey)),
+        Choice(id: "ctrl-opt-space", title: "⌃⌥ Space", key: UInt32(kVK_Space), mods: UInt32(controlKey | optionKey)),
+        Choice(id: "shift-cmd-space", title: "⇧⌘ Space", key: UInt32(kVK_Space), mods: UInt32(shiftKey | cmdKey)),
+        Choice(id: "ctrl-opt-f", title: "⌃⌥ F", key: UInt32(kVK_ANSI_F), mods: UInt32(controlKey | optionKey)),
+    ]
+    static var action: (() -> Void)?
+    private static var installed = false
+    private var ref: EventHotKeyRef?
+
+    /// Returns false if that combination is taken. "off" (or anything unknown) just switches it off.
+    func register(_ id: String) -> Bool {
+        unregister()
+        guard let c = HotKey.choices.first(where: { $0.id == id }) else { return true }
+        if !HotKey.installed {
+            var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+                DispatchQueue.main.async { HotKey.action?() }; return noErr
+            }, 1, &spec, nil, nil)
+            HotKey.installed = true
+        }
+        let hk = EventHotKeyID(signature: OSType(0x4658_4259), id: 1)   // "FXBY"
+        return RegisterEventHotKey(c.key, c.mods, hk, GetApplicationEventTarget(), 0, &ref) == noErr
+    }
+    func unregister() { if let r = ref { UnregisterEventHotKey(r); ref = nil } }
+}
+
 final class BubblePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+/// Files, images or text dragged onto him or his bubble. (A web view on its own would open a dropped file
+/// as a page; this hands the drop to the app instead.)
+enum Drops {
+    static let types: [NSPasteboard.PasteboardType] = [.fileURL, .png, .tiff, .string]
+    static func accepts(_ info: NSDraggingInfo) -> Bool {
+        info.draggingPasteboard.availableType(from: types) != nil
+    }
+}
+
+final class DropWebView: WKWebView {
+    var onDrop: ((NSPasteboard) -> Void)?
+    var onDragOver: ((Bool) -> Void)?
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard Drops.accepts(sender) else { return [] }
+        onDragOver?(true); return .copy
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { Drops.accepts(sender) ? .copy : [] }
+    override func draggingExited(_ sender: NSDraggingInfo?) { onDragOver?(false) }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { Drops.accepts(sender) }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        onDragOver?(false); onDrop?(sender.draggingPasteboard); return true
+    }
 }
 
 /// What the fox may use, from ~/.desk-buddy/config.json (all optional):
@@ -329,6 +389,7 @@ struct FoxSetup {
     var style = "wit"                   // facts | wit | comedian
     var gmailState = "unknown"          // connected, needs-auth, failed, missing, or unknown (never checked)
     var calendarState = "unknown"
+    var apple = true                    // Reminders, Notes and Shortcuts (Setup › Use Reminders, Notes & Shortcuts)
 
     static func load() -> FoxSetup {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -359,6 +420,7 @@ struct FoxSetup {
         let prefs = UserDefaults.standard
         if let n = prefs.string(forKey: "foxName"), !n.isEmpty { setup.foxName = n }
         if let st = prefs.string(forKey: "style"), ["facts", "wit", "comedian"].contains(st) { setup.style = st }
+        setup.apple = prefs.object(forKey: "appleApps") as? Bool ?? true
         return setup
     }
 
@@ -487,6 +549,9 @@ let GMAIL_NEVER = ["send_message", "reply", "forward", "trash_message", "trash_t
                    "download_gmail_attachment"]
 let CALENDAR_READ = ["list_calendars", "list_events", "get_event", "search_events", "suggest_time"]
 let CALENDAR_CHANGE = ["create_event", "update_event", "delete_event", "respond_to_event"]
+// Reminders, Notes and Shortcuts (his own foxbuddy tools, with --apple): reading is his; a change needs your OK
+let APPLE_READ = ["reminders_lists", "reminders_list", "notes_search", "notes_read", "shortcuts_list"]
+let APPLE_CHANGE = ["reminders_add", "reminders_complete", "notes_create", "shortcuts_run"]
 
 /// One change you approved in his bubble: a single connector tool (its full name, mcp__…) with exactly
 /// these arguments. The gate (foxtools.py --gate) lets that call through once and refuses any other.
@@ -503,6 +568,7 @@ struct Approval {
         let prefix: String
         if CALENDAR_CHANGE.contains(short) { prefix = "mcp__\(setup.calendar)__" }
         else if GMAIL_CHANGE.contains(short) { prefix = "mcp__\(setup.gmail)__" }
+        else if setup.apple && APPLE_CHANGE.contains(short) { prefix = "mcp__foxbuddy__" }
         else { return nil }
         return Approval(tool: prefix + short, summary: String(summary.prefix(500)), input: input)
     }
@@ -522,7 +588,8 @@ final class Asker {
     private var running: Process?
     private var session: String?          // the conversation so far (nil: the next message starts one)
     var readFiles = false                 // "Files: can open", for this chat only
-    func reset() { cancel(); Asker.forget(except: nil); session = nil; readFiles = false }
+    var attached: [String] = []           // files you dropped on him: he may open exactly these, for this chat only
+    func reset() { cancel(); Asker.forget(except: nil); session = nil; readFiles = false; attached = [] }
     var busy: Bool { running != nil }
     private var foundClaude: String?
     private var claudePath: String? {                     // looked for again until it's found (it may be installed later)
@@ -562,7 +629,7 @@ final class Asker {
     }
 
     /// What he's told on top of Claude Code's own instructions.
-    static func instructions(_ setup: FoxSetup, readFiles: Bool, approved: Approval?) -> String {
+    static func instructions(_ setup: FoxSetup, readFiles: Bool, approved: Approval?, attached: [String] = []) -> String {
         let f = DateFormatter(); f.dateFormat = "EEEE, MMMM d, yyyy, h:mm a zzz"
         var notes = (try? String(contentsOf: notesFile, encoding: .utf8)) ?? ""
         notes = String(notes.prefix(6000)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -577,9 +644,9 @@ final class Asker {
         What you can use:
         - Files: find files and folders by name with the foxbuddy find_files tool, in \(folders). When you mention a file, \
         give its full path in backticks (`/Users/...`) so the user gets a "Show in Finder" button. \
-        \(readFiles ? "The user has switched files to \"can open\" for this chat, so you may also read files in those folders with Read." : "You can see names only, not what's inside files. If you'd need to look inside one, tell the user to click \"Files: names only\" under the chat to let you open files.")
+        \(readFiles ? "The user has switched files to \"can open\" for this chat, so you may also read files in those folders with Read." : "You can see names only, not what's inside files. If you'd need to look inside one, tell the user to click \"Files: names only\" under the chat to let you open files.")\(attached.isEmpty ? "" : " The user dropped these files on you for this chat, and you may open them with Read (PDFs, documents, text, CSVs and images all work), even outside their folders: " + attached.map { "`\($0)`" }.joined(separator: ", ") + ". When they say \"this\" or \"the file\", they mean these.")
         - Activity: the user's recent steps, workouts and so on, from the foxbuddy activity tool.\(setup.extras.compactMap { $0.about.map { "\n- " + $0 } }.joined())
-        - The web: WebSearch.
+        - The web: WebSearch.\(setup.apple ? "\n- Reminders, Notes and Shortcuts (Apple's apps on this Mac), with the foxbuddy tools: read reminder lists and open reminders (reminders_lists, reminders_list), find and read notes (notes_search, notes_read), list shortcuts (shortcuts_list). The first time, macOS asks the user to allow it: if a tool says it isn't allowed, tell them where to switch it on." : "")
         \(Asker.connectorLine(setup.gmailState, "Gmail", "search and read email", "email"))
         \(Asker.connectorLine(setup.calendarState, "Google Calendar", "see calendars, events and free time", "the calendar"))
         You can't run commands, and you can't change, move or delete files.
@@ -592,7 +659,7 @@ final class Asker {
         ```fox-confirm
         {"tool": "update_event", "summary": "Move \\"Dentist\\" from Thu 2:00 PM to Fri 3:00 PM", "input": {"...": "the exact arguments"}}
         ```
-        tool is one of \(CALENDAR_CHANGE.joined(separator: ", ")) (Google Calendar) or \(GMAIL_CHANGE.joined(separator: ", ")) (Gmail drafts). \
+        tool is one of \(CALENDAR_CHANGE.joined(separator: ", ")) (Google Calendar), \(GMAIL_CHANGE.joined(separator: ", ")) (Gmail drafts)\(setup.apple ? ", or " + APPLE_CHANGE.joined(separator: ", ") + " (Reminders, Notes, Shortcuts; foxbuddy tools, so their parameters are already in your tool list)" : ""). \
         One change per reply. The user sees the summary and every argument, and gets a button to approve it. Only then can you make \
         that call, and only with exactly those arguments. Never add attendees, guests or recipients the user didn't ask for.
 
@@ -648,6 +715,7 @@ final class Asker {
     static func allowedTools(setup: FoxSetup, approved: Approval?) -> [String] {
         let gm = "mcp__\(setup.gmail)__", cal = "mcp__\(setup.calendar)__"
         var allowed: [String] = ["WebSearch", "mcp__foxbuddy__find_files", "mcp__foxbuddy__activity"]
+        if setup.apple { allowed += APPLE_READ.map { "mcp__foxbuddy__" + $0 } }
         for x in setup.extras { allowed += x.allowed }            // your own extra tools (fox-tools.json)
         allowed += GMAIL_READ.map { gm + $0 }
         allowed += CALENDAR_READ.map { cal + $0 }
@@ -657,10 +725,10 @@ final class Asker {
 
     /// What the gate (foxtools.py --gate, a PreToolUse hook) enforces on every call, whatever your own Claude Code
     /// settings allow: only these tools, Read only in your folders, and the approved change only as approved, once.
-    static func policy(setup: FoxSetup, readFiles: Bool, approved: Approval?) -> [String: Any] {
+    static func policy(setup: FoxSetup, readFiles: Bool, approved: Approval?, attached: [String] = []) -> [String: Any] {
         var allow = allowedTools(setup: setup, approved: approved).filter { $0 != approved?.tool } + ["ToolSearch"]
-        if readFiles { allow.append("Read") }
-        var p: [String: Any] = ["allow": allow, "read_roots": readFiles ? setup.folders : []]
+        if readFiles || !attached.isEmpty { allow.append("Read") }
+        var p: [String: Any] = ["allow": allow, "read_roots": (readFiles ? setup.folders : []) + attached]
         p["approval"] = approved.map { ["tool": $0.tool, "input": $0.input] } ?? NSNull()
         return p
     }
@@ -670,7 +738,7 @@ final class Asker {
 
     /// The command line for one message (the message itself goes in on stdin). gate: the policy file the hook reads.
     static func arguments(session id: String, resuming: Bool, setup: FoxSetup, readFiles: Bool,
-                          approved: Approval?, python: String, tools foxtools: String, gate: String) -> [String] {
+                          approved: Approval?, python: String, tools foxtools: String, gate: String, attached: [String] = []) -> [String] {
         let gm = "mcp__\(setup.gmail)__"
         let allowed = allowedTools(setup: setup, approved: approved)
         var never: [String] = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch"]
@@ -678,6 +746,7 @@ final class Asker {
         var foxArgs: [String] = [foxtools]
         for f in setup.folders { foxArgs += ["--folder", f] }
         for d in setup.activityDirs { foxArgs += ["--activity-dir", d] }
+        if setup.apple { foxArgs.append("--apple") }
         let server: [String: Any] = ["type": "stdio", "command": python, "args": foxArgs]
         var servers: [String: Any] = ["foxbuddy": server]
         for x in setup.extras { servers[x.name] = ["type": "stdio", "command": x.command, "args": x.args] as [String: Any] }
@@ -685,7 +754,7 @@ final class Asker {
         let mcpData = (try? JSONSerialization.data(withJSONObject: mcp)) ?? Data("{}".utf8)
         let mcpJSON = String(data: mcpData, encoding: .utf8) ?? "{}"
         var a: [String] = ["-p", "--output-format", "text", "--permission-mode", "dontAsk"]
-        a += ["--tools", readFiles ? "Read,WebSearch,ToolSearch" : "WebSearch,ToolSearch"]
+        a += ["--tools", readFiles || !attached.isEmpty ? "Read,WebSearch,ToolSearch" : "WebSearch,ToolSearch"]
         a += ["--mcp-config", mcpJSON]
         // The gate runs before every tool call. Claude Code still loads your own settings (your hooks keep the
         // bridge informed), so an allow rule there could otherwise let him use something not on his list.
@@ -695,9 +764,12 @@ final class Asker {
         a += ["--settings", settingsJSON]
         a += ["--allowedTools"]; a += allowed
         a += ["--disallowedTools"]; a += never
-        if readFiles && !setup.folders.isEmpty { a += ["--add-dir"]; a += setup.folders }
+        // Claude Code needs the folders; the gate narrows a dropped file's folder down to just that file
+        var dirs = readFiles ? setup.folders : []
+        for f in attached { let d = (f as NSString).deletingLastPathComponent; if !dirs.contains(d) { dirs.append(d) } }
+        if !dirs.isEmpty { a += ["--add-dir"]; a += dirs }
         a += resuming ? ["--resume", id] : ["--session-id", id]
-        a += ["--append-system-prompt", instructions(setup, readFiles: readFiles, approved: approved)]
+        a += ["--append-system-prompt", instructions(setup, readFiles: readFiles, approved: approved, attached: attached)]
         return a
     }
 
@@ -770,13 +842,13 @@ final class Asker {
         let tools = Bundle.main.resourceURL?.appendingPathComponent("foxtools.py").path ?? ""
         let setup = FoxSetup.load()
         let gate = Asker.gateDir.appendingPathComponent(UUID().uuidString.lowercased() + ".json")
-        guard let policy = try? JSONSerialization.data(withJSONObject: Asker.policy(setup: setup, readFiles: readFiles, approved: approved)),
+        guard let policy = try? JSONSerialization.data(withJSONObject: Asker.policy(setup: setup, readFiles: readFiles, approved: approved, attached: attached)),
               fm.createFile(atPath: gate.path, contents: policy, attributes: [.posixPermissions: 0o600]) else {
             done("I couldn't set up my tool gate (in ~/.desk-buddy/gate), so I didn't ask Claude Code.", false); return
         }
         p.executableURL = URL(fileURLWithPath: claude)
         p.arguments = Asker.arguments(session: id, resuming: resuming, setup: setup, readFiles: readFiles,
-                                      approved: approved, python: "/usr/bin/python3", tools: tools, gate: gate.path)
+                                      approved: approved, python: "/usr/bin/python3", tools: tools, gate: gate.path, attached: attached)
         p.currentDirectoryURL = dir
         p.environment = Asker.claudeEnvironment()
         p.standardOutput = out; p.standardError = err; p.standardInput = input   // the question goes in on stdin, never as an argument
@@ -868,7 +940,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     var hiddenByUser = false
     var bridgeConnected = false         // the link's state, kept on the main thread
     var bubble: BubblePanel!
-    var bubbleWeb: WKWebView!
+    var bubbleWeb: DropWebView!
     var bubbleReady = false
     var bubbleQueue: [String] = []
     var bubbleSize = NSSize(width: 324, height: 90)
@@ -933,7 +1005,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             NSLog("foxbuddy: no web folder in the app bundle (build it with tools/foxbuddy/build.sh)"); NSApp.terminate(nil); return
         }
         self.webDir = webDir
-        DispatchQueue.global().async { Asker.forget(except: nil); Asker.clearGates() }   // last time's chats and gate files
+        DispatchQueue.global().async { Asker.forget(except: nil); Asker.clearGates(); try? FileManager.default.removeItem(at: App.dropsDir) }   // last time's chats, gate files and dropped pictures
         DispatchQueue.global().async { Setup.refreshBridge() }                           // an updated app brings its bridge along
         if Setup.installed && !prefs.bool(forKey: "welcomed") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.startWelcome() }   // the first time: get acquainted
@@ -1054,6 +1126,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         grab.autoresizingMask = [.width, .height]
         grab.onTap = { [weak self] in self?.js("desk.tap()") }
         grab.onDoubleClick = { [weak self] in self?.openAsk() }
+        grab.registerForDraggedTypes(Drops.types)
+        grab.onDrop = { [weak self] pb in self?.dropped(pb) }
         grab.onMenu = { [weak self] e in guard let self = self else { return }; NSMenu.popUpContextMenu(self.menu(), with: e, for: self.grab) }
         grab.onMoved = { [weak self] in self?.moved() }
         content.addSubview(grab)
@@ -1069,6 +1143,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             else { NSLog("foxbuddy: couldn't install the offline rule: \(String(describing: err))") }
             self.loadCharacter()
             self.makeBubble()
+            if self.hotKeyID != "off" { self.setUpHotKey() }
         }
         clampOnScreen()
         panel.orderFrontRegardless()
@@ -1253,6 +1328,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         briefItems.append(NSMenuItem.separator())
         for h in hours { briefItems.append(item("From \(h):00 AM", #selector(pickBriefHour(_:)), on: briefHour == h, rep: h)) }
         m.addItem(sub("Morning Check-In", briefItems))
+        var keyItems = HotKey.choices.map { item($0.title, #selector(pickHotKey(_:)), on: hotKeyID == $0.id, rep: $0.id) }
+        keyItems.append(NSMenuItem.separator()); keyItems.append(item("Off", #selector(pickHotKey(_:)), on: hotKeyID == "off", rep: "off"))
+        m.addItem(sub("Keyboard Shortcut", keyItems))
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
         var gagItems = [item("A Random Gag", #selector(playNamed(_:)), rep: "tap"), NSMenuItem.separator()]
@@ -1278,6 +1356,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         setupItems.append(item("Introduce Yourselves Again…", #selector(startWelcome)))
         setupItems.append(item("Connect Gmail & Calendar…", #selector(connectGoogle)))
         setupItems.append(item("Check Connections", #selector(checkConnectionsNow)))
+        setupItems.append(item("Use Reminders, Notes & Shortcuts", #selector(toggleAppleApps), on: FoxSetup.load().apple))
         setupItems.append(item("Watch the Claude Desktop App", Setup.watcher == nil ? nil : #selector(toggleWatching), on: Setup.watching))
         setupItems.append(item("Browser Extension for claude.ai…", #selector(showExtension)))
         setupItems.append(.separator())
@@ -1691,7 +1770,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         bubble.isReleasedWhenClosed = false
         bubble.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         bubble.level = BUBBLE_LEVEL
-        bubbleWeb = WKWebView(frame: NSRect(x: 0, y: 0, width: 324, height: BUBBLE_MAX_H), configuration: config)
+        bubbleWeb = DropWebView(frame: NSRect(x: 0, y: 0, width: 324, height: BUBBLE_MAX_H), configuration: config)
+        bubbleWeb.unregisterDraggedTypes(); bubbleWeb.registerForDraggedTypes(Drops.types)
+        bubbleWeb.onDrop = { [weak self] pb in self?.dropped(pb) }
+        bubbleWeb.onDragOver = { [weak self] on in self?.bubbleJS("bubble.dragOver(\(on))") }
         bubbleWeb.autoresizingMask = [.width, .height]
         bubbleWeb.setValue(false, forKey: "drawsBackground")
         if #available(macOS 12.0, *) { bubbleWeb.underPageBackgroundColor = .clear }
@@ -1725,6 +1807,98 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let show: [String: Any] = ["text": String(text.prefix(300)), "kind": kind, "jump": bubbleJump != nil]
         bubbleJS("bubble.show(\(jsonLiteral(show)))")
         showBubble(key: false)
+    }
+
+    // MARK: drops
+
+    static let dropsDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/drops")
+    static let MAX_ATTACHED = 6
+
+    /// Dropped on him or his bubble: files (and pictures) he may open in this chat, or text for the message box.
+    /// A dropped picture with no file (from a web page, say) is saved in ~/.desk-buddy/drops, cleared at launch.
+    func dropped(_ pb: NSPasteboard) {
+        var files: [String] = [], skipped: [String] = []
+        let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        for u in urls {
+            var dir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: u.path, isDirectory: &dir) else { continue }
+            if dir.boolValue { skipped.append(u.lastPathComponent) } else { files.append(u.resolvingSymlinksInPath().path) }
+        }
+        if urls.isEmpty, let data = pb.data(forType: .png) ?? pb.data(forType: .tiff).flatMap({ NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }) {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: App.dropsDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let f = App.dropsDir.appendingPathComponent("picture-\(Int(Date().timeIntervalSince1970)).png")
+            if fm.createFile(atPath: f.path, contents: data, attributes: [.posixPermissions: 0o600]) { files.append(f.path) }
+        }
+        let text = urls.isEmpty && files.isEmpty ? (pb.string(forType: .string) ?? "") : ""
+        openAsk()
+        if !files.isEmpty {
+            for f in files where !asker.attached.contains(f) { asker.attached.append(f) }
+            if asker.attached.count > App.MAX_ATTACHED { asker.attached = Array(asker.attached.suffix(App.MAX_ATTACHED)) }
+            showAttached()
+        }
+        if !skipped.isEmpty { bubbleJS("bubble.info(\(jsonLiteral("Folders don't work: drop the files themselves. (Skipped " + skipped.joined(separator: ", ") + ".)")))") }
+        if !text.isEmpty { bubbleJS("bubble.insertText(\(jsonLiteral(String(text.prefix(20000)))))") }
+    }
+
+    func showAttached() {
+        let items = asker.attached.map { ["path": $0, "name": ($0 as NSString).lastPathComponent] }
+        let data = (try? JSONSerialization.data(withJSONObject: items)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        bubbleJS("bubble.attached(\(data))")
+    }
+
+    @objc func toggleAppleApps() {
+        let on = !FoxSetup.load().apple
+        prefs.set(on, forKey: "appleApps")
+        say(on ? "I'll use Reminders, Notes and Shortcuts again. macOS asks you once for each, the first time." : "I won't use Reminders, Notes or Shortcuts.")
+    }
+
+    // MARK: keyboard shortcut and Dictation
+
+    let hotKey = HotKey()
+    var hotKeyID: String { prefs.string(forKey: "hotKey") ?? "opt-space" }
+
+    /// At launch, and when you pick one. If yours is taken, he tries the others in turn and says which he got.
+    func setUpHotKey(announce: Bool = false) {
+        HotKey.action = { [weak self] in self?.toggleChat() }
+        let want = hotKeyID
+        if hotKey.register(want) {
+            if announce, let c = HotKey.choices.first(where: { $0.id == want }) { say("Press \(c.title) from anywhere to chat with me.") }
+            return
+        }
+        let wanted = HotKey.choices.first(where: { $0.id == want })?.title ?? want
+        for c in HotKey.choices where c.id != want && hotKey.register(c.id) {
+            prefs.set(c.id, forKey: "hotKey")
+            say("Another app already uses \(wanted), so my shortcut is \(c.title). Change it under Keyboard Shortcut in my menu.")
+            return
+        }
+        say("Another app already uses \(wanted), and my other shortcuts too. Double-click me to chat.")
+    }
+
+    @objc func pickHotKey(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        prefs.set(id, forKey: "hotKey")
+        if id == "off" { hotKey.unregister(); say("Shortcut off. Double-click me to chat.") } else { setUpHotKey(announce: true) }
+    }
+
+    /// The shortcut: open his chat, ready to type (or close it if it's what you're in).
+    func toggleChat() {
+        guard bubble != nil else { return }
+        if bubble.isVisible && bubbleMode == "chat" && bubble.isKeyWindow { hideBubble(); return }
+        NSApp.activate(ignoringOtherApps: true)
+        openAsk()
+    }
+
+    /// The mic button: macOS Dictation, into his message box.
+    func startDictation() {
+        guard bubble != nil else { return }
+        if !bubble.isKeyWindow { NSApp.activate(ignoringOtherApps: true); bubble.makeKeyAndOrderFront(nil) }
+        bubble.makeFirstResponder(bubbleWeb)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            if !NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil) {
+                self.bubbleJS("bubble.info(\(jsonLiteral("Press your Dictation key (the microphone key, or Fn twice) and talk. If it's off, turn it on in System Settings › Keyboard › Dictation.")))")
+            }
+        }
     }
 
     func openAsk() {
@@ -1802,9 +1976,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if let on = body["readFiles"] as? Bool { asker.readFiles = on }
         if let path = body["reveal"] as? String { reveal(path) }
         if body.keys.contains("welcome") { finishWelcome(body["welcome"] as? [String: Any]) }
-        if body["newChat"] as? Bool == true { asker.reset() }
+        if body["newChat"] as? Bool == true { asker.reset(); showAttached() }
+        if let d = body["detach"] as? String { asker.attached.removeAll { $0 == d }; showAttached() }
         if body["editNotes"] as? Bool == true { openNotesFile() }
         if body["typing"] as? Bool == true { watchTyping() }
+        if body["dictate"] as? Bool == true { startDictation() }
         if let u = body["update"] as? String {
             if u == "download" { installUpdate() }
             if u == "notes", let rel = updateOffer { NSWorkspace.shared.open(rel.page) }

@@ -90,6 +90,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><true/>
   <key>NSAppSleepDisabled</key><true/>
   <key>NSHumanReadableCopyright</key><string>MIT License. Grew out of desk-buddy, by Joe Bentham.</string>
+  <key>NSAppleEventsUsageDescription</key><string>So he can read your Reminders and Notes, and (only after you approve each one) add a reminder, make a note or run a shortcut.</string>
 $SPARKLE_PLIST
 </dict></plist>
 PLIST
@@ -104,7 +105,14 @@ if [ -n "${SIGN_IDENTITY:-}" ]; then
     codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$SPK/Versions/B/Updater.app"
     codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$SPK"
   fi
-  codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$APP"
+  # with the hardened runtime, sending Apple events (Reminders, Notes) needs this entitlement
+  ENT="$BUILD/foxbuddy.entitlements"
+  cat > "$ENT" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>com.apple.security.automation.apple-events</key><true/></dict></plist>
+PLIST
+  codesign --force --options runtime "$TS" --entitlements "$ENT" --sign "$SIGN_IDENTITY" "$APP"
   codesign --verify --strict --deep --verbose=2 "$APP"
 else
   codesign --force --deep --sign - "$APP"
