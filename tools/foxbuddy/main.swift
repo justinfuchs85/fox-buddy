@@ -662,6 +662,10 @@ final class Asker {
     var readFiles = false                 // "Files: can open", for this chat only
     var attached: [String] = []           // files you dropped on him: he may open exactly these, for this chat only
     var model: String?                    // a lighter model for background jobs (email alerts); nil: Claude Code's default
+    /// Your current settings, as plain lines, for about_fox_buddy (the app fills this in at launch). Written to
+    /// ~/.desk-buddy/settings-now.txt before each question, so his answer to "is my wrap-up on?" is current.
+    static var settingsNow: () -> String = { "" }
+    static let settingsFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/settings-now.txt")
     var quiet = false                     // a background job: its conversation id starts 0000f0c5-, which the bridge
                                           // ignores, so he doesn't act busy (or "done") for a check you didn't ask for
     func reset() { cancel(); Asker.forget(except: nil); session = nil; readFiles = false; attached = [] }
@@ -734,6 +738,10 @@ final class Asker {
         give its full path in backticks (`/Users/...`) so the user gets a "Show in Finder" button. \
         \(readFiles ? "The user has switched files to \"can open\" for this chat, so you may also read files in those folders with Read." : "You can see names only, not what's inside files. If you'd need to look inside one, tell the user to click \"Files: names only\" under the chat to let you open files.")\(attached.isEmpty ? "" : " The user dropped these files on you for this chat, and you may open them with Read (PDFs, documents, text, CSVs and images all work), even outside their folders: " + attached.map { "`\($0)`" }.joined(separator: ", ") + ". When they say \"this\" or \"the file\", they mean these.")
         - Activity: the user's recent steps, workouts and so on, from the foxbuddy activity tool.\(setup.extras.compactMap { $0.about.map { "\n- " + $0 } }.joined())
+        - Yourself: for any question about Fox Buddy (what you can or can't do, how to set something up or switch it off, \
+        where a setting is, privacy, why something isn't working, or what their settings are now), call the foxbuddy \
+        about_fox_buddy tool first and answer from it, giving menu paths exactly as it does. Never guess about your own \
+        features, menus or settings: if the guide doesn't cover it, say you're not sure and suggest Setup › Report a Problem….
         - The web: WebSearch.\(setup.apple ? "\n- Reminders, Notes and Shortcuts (Apple's apps on this Mac), with the foxbuddy tools: read reminder lists and open reminders (reminders_lists, reminders_list), find and read notes (notes_search, notes_read), list shortcuts (shortcuts_list). The first time, macOS asks the user to allow it: if a tool says it isn't allowed, tell them where to switch it on." : "")
         \(Asker.connectorLine(setup.gmailState, "Gmail", "search and read email", "email"))
         \(Asker.connectorLine(setup.calendarState, "Google Calendar", "see calendars, events and free time", "the calendar"))
@@ -804,7 +812,7 @@ final class Asker {
     /// Every tool he may use this turn: the same list goes to Claude Code (--allowedTools) and to the gate.
     static func allowedTools(setup: FoxSetup, approved: Approval?) -> [String] {
         let gm = "mcp__\(setup.gmail)__", cal = "mcp__\(setup.calendar)__"
-        var allowed: [String] = ["WebSearch", "mcp__foxbuddy__find_files", "mcp__foxbuddy__activity"]
+        var allowed: [String] = ["WebSearch", "mcp__foxbuddy__find_files", "mcp__foxbuddy__activity", "mcp__foxbuddy__about_fox_buddy"]
         if setup.apple { allowed += APPLE_READ.map { "mcp__foxbuddy__" + $0 } }
         for x in setup.extras { allowed += x.allowed }            // your own extra tools (fox-tools.json)
         allowed += GMAIL_READ.map { gm + $0 }
@@ -838,6 +846,9 @@ final class Asker {
         for f in setup.folders { foxArgs += ["--folder", f] }
         for d in setup.activityDirs { foxArgs += ["--activity-dir", d] }
         if setup.apple { foxArgs.append("--apple") }
+        // His guide to himself (fox-guide.md, next to foxtools.py) and your current settings, for about_fox_buddy.
+        foxArgs += ["--guide", URL(fileURLWithPath: foxtools).deletingLastPathComponent().appendingPathComponent("fox-guide.md").path,
+                    "--settings", Asker.settingsFile.path]
         let server: [String: Any] = ["type": "stdio", "command": python, "args": foxArgs]
         var servers: [String: Any] = ["foxbuddy": server]
         for x in setup.extras { servers[x.name] = ["type": "stdio", "command": x.command, "args": x.args] as [String: Any] }
@@ -934,6 +945,7 @@ final class Asker {
         let resuming = session != nil, id = session ?? (quiet ? "0000f0c5" + fresh.dropFirst(8) : fresh)
         lastSession = id
         let tools = Bundle.main.resourceURL?.appendingPathComponent("foxtools.py").path ?? ""
+        fm.createFile(atPath: Asker.settingsFile.path, contents: Data(Asker.settingsNow().utf8), attributes: [.posixPermissions: 0o600])
         let setup = FoxSetup.load()
         let gate = Asker.gateDir.appendingPathComponent(UUID().uuidString.lowercased() + ".json")
         guard let policy = try? JSONSerialization.data(withJSONObject: Asker.policy(setup: setup, readFiles: readFiles, approved: approved, attached: attached)),
@@ -1108,6 +1120,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             other.activate(options: [])
             NSApp.terminate(nil); return
         }
+        Asker.settingsNow = { [weak self] in self?.settingsText() ?? "" }
         guard let webDir = Bundle.main.url(forResource: "web", withExtension: nil) else {
             NSLog("foxbuddy: no web folder in the app bundle (build it with tools/foxbuddy/build.sh)"); NSApp.terminate(nil); return
         }
@@ -1983,6 +1996,35 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let on = !FoxSetup.load().apple
         prefs.set(on, forKey: "appleApps")
         say(on ? "I'll use Reminders, Notes and Shortcuts again. macOS asks you once for each, the first time." : "I won't use Reminders, Notes or Shortcuts.")
+    }
+
+    /// His current settings in plain words, for about_fox_buddy ("is my wrap-up on?", "what's my shortcut?").
+    func settingsText() -> String {
+        let setup = FoxSetup.load(), alerts = EmailAlerts.load()
+        let on = { (b: Bool) in b ? "on" : "off" }
+        let talk = ["all": "Everything Claude Does", "important": "Only When Claude Needs Me or Finishes", "off": "Nothing"][narrate] ?? narrate
+        let key = HotKey.choices.first { $0.id == hotKeyID }?.title ?? "Off"
+        let size = SIZES.min { abs($0.1 - side) < abs($1.1 - side) }?.0 ?? "Medium"
+        let lookName = LOOKS.first { $0.0 == look }?.1 ?? "Floating"
+        let every = EmailAlerts.every(alerts), watches = EmailAlerts.watches(alerts).compactMap { $0["label"] as? String }
+        var lines = [
+            "Fox Buddy version: \(App.version)",
+            "His name: \(setup.foxName); chattiness: \(["facts": "just the facts", "comedian": "full comedian"][setup.style] ?? "a little wit")",
+            "Connected to the bridge (reacting to Claude): \(bridgeConnected ? "yes" : "no")",
+            "Claude plan: \(prefs.bool(forKey: "freePlan") ? "free (chat features don't work)" : "paid, or not known")",
+            "Gmail connector: \(setup.gmailState); Google Calendar connector: \(setup.calendarState)",
+            "Reminders, Notes & Shortcuts: \(on(setup.apple))",
+            "Folders he can search: \(setup.folders.isEmpty ? "none" : setup.folders.joined(separator: ", "))",
+            "Keyboard shortcut: \(key)",
+            "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
+            "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
+            "Meeting prep offers: \(on(meetingPrep)); end-of-day wrap-up: \(wrapHour == 0 ? "off" : "weekdays from \(wrapHour - 12):00 PM")",
+            "Email alerts: \(every == 0 ? "off" : "checked every \(every) minutes"); watching for: \(watches.isEmpty ? "nothing yet" : watches.joined(separator: "; "))",
+            "Size: \(size); Look: \(lookName); Float Above Windows: \(on(!onDesktop)); Snap to Corners: \(on(snap))",
+            "Watch the Claude Desktop App: \(on(Setup.watching))",
+        ]
+        if #available(macOS 13.0, *) { lines.append("Open at Login: \(on(SMAppService.mainApp.status == .enabled))") }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: meetings

@@ -63,6 +63,7 @@ cp "$HERE/web/start.js" "$HERE/web/desktop.js" "$HERE/web/bubble.html" "$RES/web
 cp "$ROOT/characters/fox/fox.js" "$ROOT/characters/fox/rig.js" "$ROOT/characters/fox/character.js" "$RES/web/fox/"
 print -r -- '<!doctype html><meta charset="utf-8"><title>Fox</title><body></body>' > "$RES/web/fox/fox.html"
 cp "$HERE/foxtools.py" "$RES/foxtools.py"                 # his own tools, and the gate on every tool call
+cp "$HERE/fox-guide.md" "$RES/fox-guide.md"               # his guide to himself (the about_fox_buddy tool)
 # what the app installs on the Mac (Setup › Set Up Fox Buddy…): the bridge, Claude Code's hooks, the extension
 cp "$ROOT/tools/buddy_bridge.py" "$ROOT/tools/install_hooks.py" "$ROOT/tools/statusline.sh" "$RES/support/tools/"
 mkdir -p "$RES/support/browserwatch"
