@@ -109,6 +109,16 @@
   section.wrap { padding-top: 64px; padding-bottom: 64px; }
   .what { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px 56px; margin-top: 10px; }
   .what p { color: var(--muted); margin-top: 8px; }
+  .lead-in { font-size: 20px; max-width: 34em; }
+  .flows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 30px 44px; margin: 34px 0 44px; }
+  .flows > div { border-top: 3px solid var(--fox); padding-top: 14px; }
+  .flows > div:nth-child(2) { border-top-color: var(--moss); }
+  .flows > div:nth-child(3) { border-top-color: var(--cream); }
+  .flows p { color: var(--muted); margin-top: 8px; font-size: 17px; }
+  h3.sub { margin: 0 0 6px; }
+  .needs + h3.sub { margin-top: 34px; }
+  .small { font-size: 15px; margin-top: 24px; }
+  @media (max-width: 880px) { .flows { grid-template-columns: 1fr; gap: 24px; } }
   .needs { list-style: none; padding: 0; margin: 0; }
   .needs li { padding: 14px 0 14px 40px; position: relative; border-top: 2px dashed rgba(255,241,220,.18); }
   .needs li:last-child { border-bottom: 2px dashed rgba(255,241,220,.18); }
@@ -209,11 +219,40 @@
     </div>
   </section>
 
-  <section class="wrap">
+  <section class="wrap" id="privacy">
     <div class="col">
       <h2>Where your stuff goes</h2>
-      <p>Your chats with him go to Anthropic through Claude Code, under your own Claude account, the same as chatting on claude.ai. Gmail and Calendar go through your claude.ai connectors.</p>
-      <p class="muted">Nothing else leaves your Mac. The app has no analytics, no accounts and no server of ours. Once a day he asks GitHub whether there's a newer version, and that request has nothing about you in it. (This website, not the app, uses Google Tag Manager to count visits.)</p>
+      <p class="lead-in">Fox Buddy is a front end for Claude Code. Everything he thinks with goes through Claude Code, under your own Claude account and Anthropic's terms. There's no Fox Buddy server, no account to make, and no analytics in the app.</p>
+    </div>
+    <div class="flows">
+      <div>
+        <h3>Goes to Anthropic, through Claude Code</h3>
+        <p>Your chats with him, and whatever he looks at to answer: a file you let him open or drop on him, a note, your reminders. Gmail and Calendar go through your claude.ai connectors, the same way they do on claude.ai. Claude Code also sends Anthropic its own usage and error reports.</p>
+      </div>
+      <div>
+        <h3>Goes to GitHub</h3>
+        <p>Once a day he asks whether there's a newer version of him, and updates download from there. Nothing about you is in either. If you give him a calendar link or Slack in his settings, he checks those directly too; out of the box, he doesn't.</p>
+      </div>
+      <div>
+        <h3>Stays on your Mac</h3>
+        <p>His settings, what he knows about you, his logs and your email alerts, in a folder in your home folder. He clears his chat history when you start a new chat. His parts only talk to each other on your Mac, and the browser extension tells him that Claude is working, never what you typed.</p>
+      </div>
+    </div>
+    <div class="col">
+      <h3 class="sub">What he can't do</h3>
+      <ul class="needs">
+        <li><strong>Run commands, or change, move or delete your files.</strong> His chats run Claude Code with those switched off, and a gate checks every single thing he tries against his list.</li>
+        <li><strong>Send email.</strong> He can write a Gmail draft, after you say yes.</li>
+        <li><strong>Make a change on his own.</strong> An event, a draft, a reminder, a note or a shortcut only happens once you approve that exact change, and only once.</li>
+        <li><strong>Open your files unless you let him.</strong> He finds them by name. Reading inside one takes a click, or dropping it on him, and lasts for that chat.</li>
+      </ul>
+      <h3 class="sub">What macOS will ask you about</h3>
+      <ul class="needs">
+        <li><strong>Reminders and Notes,</strong> the first time he uses them. You can turn them off in his menu.</li>
+        <li><strong>Accessibility,</strong> only if you switch on watching the Claude desktop app.</li>
+        <li><strong>A helper that starts at login,</strong> which keeps him in touch with Claude Code. Setup also adds a few lines to Claude Code's settings so your sessions can tell him what they're doing.</li>
+      </ul>
+      <p class="muted small">Using him at work? He uses whichever Claude account Claude Code is signed in to, so check that it's one your company is OK with before pointing him at work files or email. Report a Problem shows you exactly what it would send before anything goes anywhere. This website, not the app, uses Google Tag Manager to count visits.</p>
     </div>
   </section>
 
