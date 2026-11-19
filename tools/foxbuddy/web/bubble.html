@@ -115,6 +115,8 @@
   .confirm .what { font: 700 13.5px/1.35 var(--round); margin-bottom: 8px; }
   .confirm .actions { margin-top: 0; }
   .confirm.settled { border-color: var(--line); background: transparent; }
+  .handoff { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .handoff .why { color: var(--muted); font-size: 12px; flex-basis: 100%; }
   .confirm.settled .actions { display: none; }
   .confirm .result { color: var(--muted); font: 700 12px var(--round); }
   .confirm .result.ok { display: inline-block; color: var(--done); border: 2px solid currentColor; border-radius: 6px;
@@ -293,6 +295,11 @@
       text = String(text).replace(/```fox-confirm[ \t]*\n([\s\S]*?)```/g, (m, body) => { ask = proposal(body); if (!ask) unreadable = true; return ''; });
       text = text.replace(/^[ \t]*\[\[confirm (remember|forget|watch|unwatch):[ \t]*([^\]\n]{1,500})\]\][ \t]*$/gim, (m, kind, what) => { ask = { kind: kind.toLowerCase(), summary: what.trim() }; return ''; }).trim();
       if (ask) unreadable = false;
+      // A job he can't do here ends with "[[handoff claude]]" or "[[handoff code: <folder>]]": a button that moves the
+      // whole conversation to Claude (the app, or claude.ai) or to Claude Code in Terminal, in that folder.
+      let handoff = null;
+      text = text.replace(/^[ \t]*\[\[handoff (claude|code)(?::[ \t]*([^\]\n]{1,500}))?\]\][ \t]*$/gim, (m, where, dir) => {
+        handoff = { where: where.toLowerCase(), dir: (dir || '').trim() }; return ''; }).trim();
       if (turns.length) turns[turns.length - 1].fox = text;
       const d = addFox(markdown(text) + '<div class="tools"><button class="link copy">Copy</button></div>');
       d.querySelector('button.copy').onclick = e => { post({ copy: text }); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1200); };
@@ -303,6 +310,16 @@
           b.onclick = () => post({ reveal: t.replace(/\/$/, '') }); c.after(b);
         }
       });
+      if (handoff && !ask) {
+        const h = document.createElement('div'); h.className = 'handoff';
+        const b = document.createElement('button'); b.className = 'act primary';
+        b.textContent = handoff.where === 'code' ? 'Continue in Claude Code' : 'Continue in Claude';
+        b.onclick = () => handoff.where === 'code' ? post({ handoffCode: { text: transcript(''), dir: handoff.dir } }) : openInClaude('');
+        h.appendChild(b);
+        if (handoff.where === 'code') { const w = document.createElement('div'); w.className = 'why';
+          w.textContent = 'Opens Claude Code in Terminal' + (handoff.dir && handoff.dir !== '~' ? ' in ' + handoff.dir : '') + ', with this conversation filled in.'; h.appendChild(w); }
+        d.appendChild(h);
+      }
       if (ask) confirmCard(d, ask);
       else if (unreadable) { settleAll('Not done.'); const n = document.createElement('div'); n.className = 'confirm settled';
         n.innerHTML = '<div class="result">He proposed a change, but not in a form that can be checked, so there\'s nothing to approve. Ask him again.</div>'; d.appendChild(n); }
