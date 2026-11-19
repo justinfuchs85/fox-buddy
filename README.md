@@ -30,7 +30,9 @@ justinfuchs85/fox-buddy/fox-buddy`. His chat needs Claude Pro or Max; he install
   **Open in Claude**. Details: [His tools](tools/foxbuddy/README.md#his-tools).
 - **Remembers what you tell him**: "remember that…" saves a note once you OK it, a few questions the
   first time he opens set his name and how chatty he is, and **What He Knows About You** shows it all in
-  his chat. A **morning check-in** gives you today's meetings and the email that needs you.
+  his chat. A **morning check-in** gives you today's meetings and the email that needs you, and
+  **email alerts** ("tell me when anything from Jane comes in") make him hold up a letter when matching mail
+  arrives: he checks every 15 minutes while you're at your Mac (right-click › Email Alerts).
 - **Wakes up when you come over**: he dozes when nothing's going on. Click him, or rest your pointer on
   him for a second, and he yawns, rubs his eyes and waves; while you type in his bubble, he watches.
 - **Gags**: once he's awake, click him for one of 14 (pounce, tail chase, zoomies, floss, dab, dubstep

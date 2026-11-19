@@ -275,7 +275,7 @@
     show(m) {                                       // a line about what Claude is doing: { text, kind, jump }
       $('card').className = m.kind === 'needs' ? 'needs' : m.kind === 'done' ? 'done' : '';
       $('text').innerHTML = inline(m.text || '');
-      $('sayActions').hidden = !m.jump;
+      $('sayActions').hidden = !m.jump; $('jump').textContent = m.jumpLabel || 'Show me';
       mode('say');
       timeout(m.kind === 'needs' ? 0 : m.kind === 'done' ? 14 : 6);
     },
@@ -287,7 +287,7 @@
       // A note for him to remember or forget arrives as a last line "[[confirm remember: ...]]": the app saves it itself.
       let ask = null, unreadable = false;
       text = String(text).replace(/```fox-confirm[ \t]*\n([\s\S]*?)```/g, (m, body) => { ask = proposal(body); if (!ask) unreadable = true; return ''; });
-      text = text.replace(/^[ \t]*\[\[confirm (remember|forget):[ \t]*([^\]\n]{1,500})\]\][ \t]*$/gim, (m, kind, what) => { ask = { kind: kind.toLowerCase(), summary: what.trim() }; return ''; }).trim();
+      text = text.replace(/^[ \t]*\[\[confirm (remember|forget|watch|unwatch):[ \t]*([^\]\n]{1,500})\]\][ \t]*$/gim, (m, kind, what) => { ask = { kind: kind.toLowerCase(), summary: what.trim() }; return ''; }).trim();
       if (ask) unreadable = false;
       if (turns.length) turns[turns.length - 1].fox = text;
       const d = addFox(markdown(text) + '<div class="tools"><button class="link copy">Copy</button></div>');
@@ -350,6 +350,7 @@
       i.value = (i.value ? i.value.trimEnd() + '\n\n' : '') + q + '\n\n';
       i.dispatchEvent(new Event('input')); i.focus(); i.setSelectionRange(i.value.length, i.value.length); report();
     },
+    insertDraft(t) { const i = $('input'); if (!i.value) { i.value = t; i.dispatchEvent(new Event('input')); } i.focus(); i.setSelectionRange(i.value.length, i.value.length); },
     dictating(on) { $('mic').classList.toggle('on', !!on); },
     shown() { tucked = false; lastActive = Date.now(); },
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
@@ -369,7 +370,8 @@
   // Only the newest one can be approved; sending anything else cancels it.
   function confirmCard(d, ask) {
     settleAll('Not done.');
-    const local = ask.kind === 'remember' || ask.kind === 'forget';        // his notes: the app does it, no reply needed
+    const local = ['remember', 'forget', 'watch', 'unwatch'].includes(ask.kind);   // notes and email alerts: the app does it, no reply needed
+    const LOCAL = { remember: ['Remember', 'Save it'], forget: ['Forget', 'Forget it'], watch: ['Email alert', 'Set it up'], unwatch: ['Remove email alert', 'Remove it'] };
     const calendar = CALENDAR_TOOLS.includes(ask.tool), apple = APPLE_TOOLS[ask.tool];
     const emails = local ? [] : [...new Set(JSON.stringify(ask.input).match(EMAIL) || [])];
     const warn = local ? ''
@@ -379,10 +381,12 @@
       : !calendar ? '<div class="note">Saved as a draft in Gmail. Nothing is sent.</div>' : '';
     const rows = Object.entries(ask.input || {}).map(([k, v]) => `<div><span class="k">${esc(k)}</span> ${esc(shown(v))}</div>`).join('');
     const card = document.createElement('div'); card.className = 'confirm live';
-    const label = local ? (ask.kind === 'remember' ? 'Remember' : 'Forget') : calendar ? 'Calendar' : apple || 'Gmail draft';
-    card.innerHTML = `<div class="what">${label}: ${esc(ask.summary)}</div>` + warn +
+    const label = local ? LOCAL[ask.kind][0] : calendar ? 'Calendar' : apple || 'Gmail draft';
+    const parts = ask.kind === 'watch' ? ask.summary.split('||').map(x => x.trim()) : null;
+    card.innerHTML = `<div class="what">${label}: ${esc(parts ? parts[0] : ask.summary)}</div>` +
+      (parts && parts[1] ? `<div class="note">Gmail search: ${esc(parts[1])}. Checked every few minutes while you're at your Mac, for new mail only.</div>` : '') + warn +
       (local ? '' : `<details class="args" open><summary>Exactly what he'll do (${esc(ask.tool)})</summary>${rows || '<div>(no arguments)</div>'}</details>`) +
-      `<div class="actions"><button class="act primary yes">${local ? (ask.kind === 'remember' ? 'Save it' : 'Forget it') : 'Yes, do it'}</button><button class="act no">No</button></div><div class="result" hidden></div>`;
+      `<div class="actions"><button class="act primary yes">${local ? LOCAL[ask.kind][1] : 'Yes, do it'}</button><button class="act no">No</button></div><div class="result" hidden></div>`;
     card.querySelector('.yes').onclick = () => {
       if (busy) return;
       if (local) { settle(card, 'Approved.'); post({ confirm: ask }); return; }

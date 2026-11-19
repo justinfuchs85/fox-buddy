@@ -145,6 +145,7 @@ hooks off (`disableAllHooks`), he won't chat until you remove that setting.
 | Read Google Calendar | Your claude.ai Google Calendar connector: calendars, events, free time | |
 | Change your calendar, write Gmail drafts, add or complete a reminder, make a note, run a shortcut | Only after you approve | See below. A shortcut can do anything it's built to do, so its card says so. |
 | Remember things about you | Adds a line to his notes | Only after you click **Save it** |
+| Email alerts | Gmail searches he runs every 15 minutes (5, 30, 60 or off: right-click › Email Alerts) while you're at your Mac, on Claude's lightest model to spare your usage | Set up only after you click **Set it up**. New mail only, each email once. Saved in `~/.desk-buddy/email-alerts.json`. |
 
 **Changes need your OK, one exact call at a time.** When you ask for a change ("move my dentist
 appointment to Friday at 3"), he looks things up, then proposes one call: which tool, and its exact

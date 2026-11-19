@@ -103,7 +103,9 @@
   // asked: what the bridge (or his own offline mode) wants; shown: what he actually plays.
   let present = false, asked = 'idle', wakeUntil = 0;
   const WAKE_MS = 90 * 1000;                        // after you wake him, he stays up this long (more while you're around)
-  const shown = m => ((m === 'idle' || m === 'night') && millis() < wakeUntil ? 'awake' : m === 'night' && present ? 'idle' : m);
+  let holdMood = null, holdUntil = 0;              // the app showing something for a while (an email alert: the letter)
+  const shown = m => ((m === 'idle' || m === 'night' || m === 'awake') && holdMood && millis() < holdUntil ? holdMood
+    : (m === 'idle' || m === 'night') && millis() < wakeUntil ? 'awake' : m === 'night' && present ? 'idle' : m);
   function want(m) { asked = m; if (shown(m) !== target) setTarget(shown(m)); }
   function setPresent(on) { present = !!on; if (asked === 'night') want('night'); }
 
@@ -227,7 +229,14 @@
     startSeq({ kind: 'event', key: 'wake_' + from, from, to: 'awake' });
     return true;
   }
-  function wakeCheck(now) { if (wakeUntil && now >= wakeUntil) { wakeUntil = 0; want(asked); } }
+  function wakeCheck(now) {
+    if (wakeUntil && now >= wakeUntil) { wakeUntil = 0; want(asked); }
+    if (holdMood && now >= holdUntil) { holdMood = null; want(asked); }
+  }
+  function hold(mood, ms) {
+    if (!L.LOOPS[mood]) return;
+    holdMood = mood; holdUntil = millis() + Math.min(+ms || 60000, 10 * 60000); present = true; want(asked);
+  }
   // You're typing in his bubble: he watches you do it, looking toward the bubble (gx, gy: about -1..1,
   // up negative). Asleep, he wakes up first. It eases in, and back out a moment after you stop.
   const WATCH_MS = 2500;
@@ -372,7 +381,7 @@
   }
 
   window.desk = {
-    line, tap, wake, watch, setLook, said, hit, act: setAct, present: setPresent,
+    line, tap, wake, watch, hold, setLook, said, hit, act: setAct, present: setPresent,
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
     state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, act, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
     // for tests: jump the clock forward
