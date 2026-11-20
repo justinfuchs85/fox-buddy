@@ -373,8 +373,9 @@ default; each one can be switched off there.
 - Welcome Me Back: after 15 minutes or more away from the Mac (or when the user unlocks it), he wakes up
   and says how long they were gone, and mentions if something came in meanwhile. Only between 7 AM and
   11 PM, not while hidden or sharing.
-- React to What I Copy: copy a colour (#3D8BFF, #fff or rgb(61, 139, 255)) and he holds up a paint chip of
-  it for a few seconds. Copy a phone number and he offers to Call it (through iPhone or FaceTime). Only
+- React to What I Copy: copy a colour (#3D8BFF, #fff, #3D8BFFCC or rgb(61, 139, 255), alone or in a bit of text like
+  "color: #3D8BFF;") and he holds up a paint chip of
+  it for a few seconds. Five hex digits isn't a colour, so #11111 gets nothing. Copy a phone number and he offers to Call it (through iPhone or FaceTime). Only
   short plain text; anything a password manager marks private is ignored, and nothing is saved or sent.
 - Pounce at My Pointer: wiggle the pointer quickly back and forth right next to him and he crouches,
   wiggles and pounces at it, like a cat with a laser dot. At most every 20 seconds.

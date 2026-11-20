@@ -3175,12 +3175,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             showBubble(key: false)
         }
     }
+    /// A colour somewhere in short copied text: "#3D8BFF", "hex #fff", "color: #3d8bffcc;", "rgb(61, 139, 255)".
+    /// 3, 4, 6 or 8 hex digits (alpha dropped); anything else, like 5 digits, isn't a colour.
     static func colourHex(_ s: String) -> String? {
         let t = s.lowercased()
-        if t.range(of: #"^#[0-9a-f]{6}$"#, options: .regularExpression) != nil { return t }
-        if t.range(of: #"^#[0-9a-f]{3}$"#, options: .regularExpression) != nil { return "#" + t.dropFirst().map { "\($0)\($0)" }.joined() }
-        if let r = t.range(of: #"^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})"#, options: .regularExpression) {
-            let n = t[r].split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        if let r = t.range(of: #"(?<![0-9a-z])#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})(?![0-9a-z])"#, options: .regularExpression) {
+            let h = t[r].dropFirst()
+            return "#" + (h.count <= 4 ? h.prefix(3).map { "\($0)\($0)" }.joined() : String(h.prefix(6)))
+        }
+        if let r = t.range(of: #"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})"#, options: .regularExpression) {
+            let n = t[r].dropFirst(3).split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
             if n.count >= 3, n.prefix(3).allSatisfy({ $0 <= 255 }) { return "#" + n.prefix(3).map { String(format: "%02x", $0) }.joined() }
         }
         return nil
