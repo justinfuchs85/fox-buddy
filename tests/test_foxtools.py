@@ -98,6 +98,7 @@ class AboutFoxBuddy(unittest.TestCase):
         menu += swift[swift.index("    func emailAlertItems()"):swift.index("    @objc func removeEmailAlert")]
         menu += swift[swift.index("    func captureItems()"):swift.index("    @objc func pickCaptureTo")]
         menu += swift[swift.index("    func moveItems()"):swift.index("    @objc func pickMoveEvery")]
+        menu += swift[swift.index("    func shipItems()"):swift.index("    @objc func checkShipsNow")]
         titles = set(re.findall(r'(?:item|sub)\("([^"\\]+)"', menu))
         titles -= {"Off", "Tap", "Hide (Open Fox Buddy Again to Bring Him Back)", "No alerts yet",
                    "Ask a Question… (or Double-Click Him)"}                       # named differently, or nothing to explain

@@ -6,8 +6,8 @@
   const F = window.__foxDraw, R = window.__foxRig;
   const { CREAM, INK, DARK, stroke, dot, trace, wob, part, oval } = F;
 
-  const MOMENTS = ['idle', 'working', 'alert', 'done', 'waiting', 'longhaul', 'night', 'meeting', 'awake', 'letter'];
-  const BASE = { idle: 'idle', working: 'working', alert: 'alert', done: 'done', waiting: 'alert', longhaul: 'working', night: 'idle', meeting: 'meeting', awake: 'awake', letter: 'letter' };
+  const MOMENTS = ['idle', 'working', 'alert', 'done', 'waiting', 'longhaul', 'night', 'meeting', 'awake', 'letter', 'flag'];
+  const BASE = { idle: 'idle', working: 'working', alert: 'alert', done: 'done', waiting: 'alert', longhaul: 'working', night: 'idle', meeting: 'meeting', awake: 'awake', letter: 'letter', flag: 'done' };
   const GAGS = ['pounce', 'tailchase', 'sneeze', 'howl', 'zoomies', 'hiccup', 'leaf', 'boop', 'yawn', 'peekaboo', 'disco', 'floss', 'dab', 'dubstep'];
 
   const D = {}, LOOPS = {}, TRANS = {}, CLIPS = {};
@@ -136,6 +136,10 @@
       const looks = [[0, 0], [0, 0], [-3, 0], [-3, 0], [0, 0], [3, 0], [3, 0], [0, 0]];
       return looks.map((look, i) => [mix(AWAKE, { eyes: i === 4 ? 'closed' : 'look', look, tilt: look[0] * 0.02, earL: look[0] < 0 ? -0.12 : 0, earR: look[0] > 0 ? -0.12 : 0, tail: wave(i, 8, 0.15), mouth: 'w', fx: 'awake' }), 5]);
     },
+    // flag: something you shipped is live. He waves a pennant that says so.
+    flag: () => Array.from({ length: 6 }, (_, i) => [mix(AWAKE, { eyes: 'happy', mouth: i % 3 === 1 ? 'smile' : 'open', blush: true, x: -34,
+      armR: i % 2 ? [176, 88] : [168, 94], armL: i % 2 ? [92, 104] : [96, 112], prop: 'flag', sway: i % 2 ? 0.1 : -0.1,
+      y: i % 3 === 0 ? -4 : 0, squash: i % 3 === 2 ? 0.04 : 0, tail: 0.3 + wave(i, 6, 0.15), fx: 'none' }), 4]),
     letter: () => Array.from({ length: 6 }, (_, i) => [mix(AWAKE, { eyes: 'happy', mouth: 'smile', armL: [104, 172 - (i % 2) * 3], armR: [152, 172 - (i % 2) * 3], prop: 'letter', y: i % 3 === 0 ? -3 : 0, tail: 0.2 + wave(i, 6, 0.2), fx: 'none' }), 4]),
   };
   const firstPose = {};
@@ -431,6 +435,22 @@
       stroke(c, [[x - 28, y + 16], [x - 9, y + 1]], seed + 653, 1.8, '#B8AC98'); stroke(c, [[x + 28, y + 16], [x + 9, y + 1]], seed + 654, 1.8, '#B8AC98');
       part(c, oval(x, y + 3, 6.5, 6.5, 10), '#E8454B', seed + 652, { width: 2.2, lineColour: INK, wobble: 0.3 });   // a wax seal
       stroke(c, [[x - 2.5, y + 3], [x + 2.5, y + 3]], seed + 655, 1.6, '#FFB3B5');
+    },
+    flag(c, P, a, seed, tick) {                          // "It's live!": a pennant on a pole, waved from his right paw
+      const hx = (P.armR ? P.armR[0] : 172) + (P.x || 0), hy = (P.armR ? P.armR[1] : 92) + (P.y || 0);
+      const sway = P.sway || 0, len = 78;
+      const top = [hx + Math.sin(sway) * len, hy - Math.cos(sway) * len];
+      stroke(c, [[hx - Math.sin(sway) * 14, hy + Math.cos(sway) * 14], top], seed + 900, 4.4, '#8B5A3C');
+      const t = tick / 24, w = 70, h = 30, n = 9, edge = [];
+      for (let i = 0; i <= n; i++) {                                 // the cloth ripples along its length
+        const u = i / n, rip = Math.sin(t * 7 - i * 0.85) * 3.2 * u;
+        edge.push([top[0] + 2 + u * w * Math.cos(sway * 0.6), top[1] + 2 + u * w * Math.sin(sway * 0.6) + rip]);
+      }
+      const cloth = [...edge, ...edge.slice().reverse().map(([x, y]) => [x, y + h])];
+      part(c, cloth, '#E8454B', seed + 901, { width: 3.2, wobble: 0.3 });
+      const mid = edge[Math.round(n / 2)];
+      text(c, "It's live!", mid[0], mid[1] + h / 2 + 1, 12, sway * 0.6, CREAM);
+      dot(c, top[0], top[1] - 1, 3.6, '#FFD23F');                    // the knob on top
     },
     moon(c, P, a, seed) {
       c.save(); c.beginPath(); c.arc(48, 46, 18, 0, Math.PI * 2); c.fillStyle = '#FFE9A8'; c.fill();

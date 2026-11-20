@@ -1225,7 +1225,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         // The morning check-in: looked at once a minute.
         let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.checkBrief(); self?.checkForUpdate(); self?.checkEmailAlerts()
-            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement()
+            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips()
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
@@ -1557,6 +1557,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Email Alerts", emailAlertItems()))
         m.addItem(sub("Meetings", meetingItems()))
         m.addItem(sub("Stretch Breaks", moveItems()))
+        m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(item("Look at My Screen", #selector(lookAtScreen)))
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
@@ -2115,6 +2116,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
+            "Ship Watcher: \(shipRepos.isEmpty ? "not watching any repositories" : "watching " + shipRepos.joined(separator: ", "))",
             "Stretch breaks: \(moveEvery == 0 ? "off" : "after \(moveEvery) minutes without a break")",
             "Quiet During Meetings: \(on(quietInMeetings))\(inMeetingNow() ? " (in a meeting right now)" : "")",
             "Meeting prep offers: \(on(meetingPrep)); end-of-day wrap-up: \(wrapHour == 0 ? "off" : "weekdays from \(wrapHour - 12):00 PM")",
@@ -2302,6 +2304,161 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         guard let m = s.representedObject as? Int else { return }
         moveEvery = m; activeSince = 0
         say(m == 0 ? "No more stretch reminders." : "After \(m == 60 ? "an hour" : m == 90 ? "90 minutes" : "2 hours") at it without a break, I'll suggest a stretch.")
+    }
+
+    // MARK: ship watcher
+
+    /// GitHub repositories you watch (public ones): when a release or deploy run finishes, he waves an "It's live!"
+    /// flag and says what went out, with a link; when one fails, he says which step failed. Uses GitHub's public
+    /// API without signing in (60 requests an hour): every 5 minutes, every 2 while a run is going.
+    /// Right-click › Ship Watcher. State in UserDefaults "shipState": {repo: {"release": tag, "running": [ids], "told": [ids]}}.
+    var shipRepos: [String] {
+        get { prefs.stringArray(forKey: "shipRepos") ?? [] }
+        set { prefs.set(newValue, forKey: "shipRepos") }
+    }
+    var shipCheckedAt = 0.0, shipBusy = false
+    static let RELEASE_WORDS = try? NSRegularExpression(pattern: "release|deploy|publish|ship", options: .caseInsensitive)
+
+    func checkShips(force: Bool = false) {
+        guard !shipRepos.isEmpty, !shipBusy, ready else { return }
+        let state = prefs.dictionary(forKey: "shipState") as? [String: [String: Any]] ?? [:]
+        let running = state.values.contains { !(($0["running"] as? [Int]) ?? []).isEmpty }
+        let now = Date().timeIntervalSince1970
+        guard force || now - shipCheckedAt >= (running ? 110 : 290) else { return }
+        shipCheckedAt = now; shipBusy = true
+        let group = DispatchGroup()
+        var results: [String: [String: Any]] = [:]
+        for repo in shipRepos {
+            group.enter()
+            App.github("repos/\(repo)/actions/runs?per_page=8") { runs in
+                App.github("repos/\(repo)/releases/latest") { rel in
+                    DispatchQueue.main.async { results[repo] = ["runs": runs ?? [:], "release": rel ?? [:]]; group.leave() }
+                }
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            self?.shipBusy = false
+            for (repo, r) in results { self?.shipNews(repo, r["runs"] as? [String: Any] ?? [:], r["release"] as? [String: Any] ?? [:]) }
+        }
+    }
+
+    static func github(_ path: String, _ done: @escaping ([String: Any]?) -> Void) {
+        guard let url = URL(string: "https://api.github.com/" + path) else { done(nil); return }
+        var req = URLRequest(url: url); req.timeoutInterval = 20
+        req.setValue("FoxBuddy/\(App.version)", forHTTPHeaderField: "User-Agent")
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            guard (resp as? HTTPURLResponse)?.statusCode == 200, let data = data else { done(nil); return }
+            done((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
+        }.resume()
+    }
+
+    func shipNews(_ repo: String, _ runs: [String: Any], _ release: [String: Any]) {
+        var all = prefs.dictionary(forKey: "shipState") as? [String: [String: Any]] ?? [:]
+        var st = all[repo] ?? [:]
+        let first = st.isEmpty
+        var running = Set((st["running"] as? [Int]) ?? []), told = (st["told"] as? [Int]) ?? []
+        let list = (runs["workflow_runs"] as? [[String: Any]]) ?? []
+        var celebrated = false
+        for run in list {
+            guard let id = run["id"] as? Int else { continue }
+            let name = run["name"] as? String ?? "", branch = run["head_branch"] as? String ?? ""
+            let event = run["event"] as? String ?? "", tagged = branch.range(of: #"^v?\d+\.\d+"#, options: .regularExpression) != nil
+            let named = App.RELEASE_WORDS?.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
+            // A real ship: a run for a version tag, or a release/deploy run started by hand or on the main branch
+            // (not a test build on some other branch).
+            let isShip = tagged || (named && (event == "workflow_dispatch" || event == "release" || ["main", "master"].contains(branch)))
+            guard isShip, !told.contains(id) else { continue }
+            let status = run["status"] as? String ?? "", conclusion = run["conclusion"] as? String ?? ""
+            if status != "completed" { running.insert(id); continue }
+            running.remove(id); told.append(id)
+            if first { continue }                                     // first look: just learn what's already there
+            let link = run["html_url"] as? String ?? "https://github.com/\(repo)/actions"
+            if conclusion == "success" {
+                let tag = release["tag_name"] as? String ?? "", newTag = !tag.isEmpty && tag != st["release"] as? String
+                if newTag {
+                    celebrate("**\(tag)** of \(repo) is out. It's live!", url: release["html_url"] as? String ?? link, label: "See it")
+                    st["release"] = tag; celebrated = true
+                } else if name.range(of: "deploy|publish|pages", options: [.regularExpression, .caseInsensitive]) != nil {
+                    celebrate("**\(name)** for \(repo) finished. It's live!", url: link, label: "See it"); celebrated = true
+                }                                                     // (a build that made no new release: nothing to wave about)
+            } else if conclusion == "failure" || conclusion == "timed_out" {
+                shipFailed(repo, run: id, name: name, branch: branch, link: link)
+            }
+        }
+        if let tag = release["tag_name"] as? String, !tag.isEmpty, tag != st["release"] as? String {
+            if !first && !celebrated {
+                celebrate("**\(tag)** of \(repo) is out. It's live!", url: release["html_url"] as? String ?? "https://github.com/\(repo)/releases", label: "See it")
+            }
+            st["release"] = tag
+        }
+        st["running"] = Array(running); st["told"] = Array(told.suffix(40))
+        all[repo] = st
+        prefs.set(all, forKey: "shipState")
+    }
+
+    func celebrate(_ text: String, url: String, label: String) {
+        js("desk.hold('flag', 25000)")
+        bubbleJump = ["url": url]; bubbleKind = "done"; bubbleMode = "say"
+        bubbleJS("bubble.show(\(jsonLiteral(["text": text, "kind": "done", "jump": true, "jumpLabel": label] as [String: Any])))")
+        showBubble(key: false)
+    }
+
+    func shipFailed(_ repo: String, run: Int, name: String, branch: String, link: String) {
+        App.github("repos/\(repo)/actions/runs/\(run)/jobs") { [weak self] jobs in
+            var step = ""
+            for j in (jobs?["jobs"] as? [[String: Any]]) ?? [] where j["conclusion"] as? String == "failure" {
+                step = ((j["steps"] as? [[String: Any]]) ?? []).first { $0["conclusion"] as? String == "failure" }?["name"] as? String
+                    ?? j["name"] as? String ?? ""
+                break
+            }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let what = branch.isEmpty ? "**\(name)**" : "**\(name)** for \(branch)"
+                self.bubbleJump = ["url": link]; self.bubbleKind = "needs"; self.bubbleMode = "say"
+                self.bubbleJS("bubble.show(\(self.jsonLiteral(["text": "\(what) in \(repo) failed\(step.isEmpty ? "" : " at \"\(step)\""). Nothing went out.", "kind": "needs", "jump": true, "jumpLabel": "See the run"] as [String: Any])))")
+                self.showBubble(key: false)
+            }
+        }
+    }
+
+    func shipItems() -> [NSMenuItem] {
+        var items = [item("Watch a GitHub Repository…", #selector(addShipRepo)), item("Check Now", #selector(checkShipsNow))]
+        if !shipRepos.isEmpty { items.append(.separator()) }
+        items += shipRepos.map { item("Stop Watching \($0)", #selector(removeShipRepo(_:)), rep: $0) }
+        return items
+    }
+    @objc func checkShipsNow() { if shipRepos.isEmpty { addShipRepo() } else { checkShips(force: true); say("Checking…") } }
+    @objc func addShipRepo() {
+        let a = NSAlert()
+        a.messageText = "Which GitHub repository should I watch?"
+        a.informativeText = "Its owner and name, like justinfuchs85/fox-buddy (or paste its link). It has to be public. When a release or deploy finishes, I'll wave a flag; if one fails, I'll say where."
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24)); f.placeholderString = "owner/repository"
+        a.accessoryView = f; a.addButton(withTitle: "Watch"); a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        a.window.initialFirstResponder = f
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        var r = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let u = URL(string: r), u.host?.hasSuffix("github.com") == true { r = u.path.split(separator: "/").prefix(2).joined(separator: "/") }
+        r = r.trimmingCharacters(in: CharacterSet(charactersIn: "/")).replacingOccurrences(of: ".git", with: "")
+        guard r.range(of: #"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"#, options: .regularExpression) != nil else {
+            say("That doesn't look like owner/repository. Try again from Ship Watcher in my menu."); return
+        }
+        App.github("repos/\(r)") { [weak self] info in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard info != nil else { self.say("I can't see \(r) on GitHub. Is it public, and spelled right?"); return }
+                if !self.shipRepos.contains(r) { self.shipRepos.append(r) }
+                self.say("Watching \(r). When a release or deploy goes out, I'll wave the flag.")
+                self.checkShips(force: true)
+            }
+        }
+    }
+    @objc func removeShipRepo(_ s: NSMenuItem) {
+        guard let r = s.representedObject as? String else { return }
+        shipRepos.removeAll { $0 == r }
+        var all = prefs.dictionary(forKey: "shipState") ?? [:]; all[r] = nil; prefs.set(all, forKey: "shipState")
+        say("Stopped watching \(r).")
     }
 
     // MARK: screen sharing

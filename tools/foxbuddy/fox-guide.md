@@ -217,6 +217,16 @@ second Mac has its own.
   calendar counts as a meeting.
 - Each of these is one chat with Claude and counts toward usage.
 
+## Ship Watcher
+
+He can watch public GitHub repositories for releases and deploys: right-click › Ship Watcher › Watch a
+GitHub Repository… (owner/repository, or its link). When a run whose name says release, deploy, publish or
+ship (or one for a version tag like v1.2.0) finishes, he waves a red "It's live!" flag and the bubble says
+what went out, with See it. When one fails, the bubble says which step failed, with See the run. A new
+release published on its own counts too. He checks every 5 minutes (every 2 while a run is going), using
+GitHub's public API without signing in, so private repositories don't work. Check Now looks right away;
+Stop Watching removes one.
+
 ## Stretch breaks
 
 After 90 minutes of nonstop keyboard and mouse, he does a big stretch and suggests a break (a quick lap).
