@@ -168,8 +168,26 @@ class MoodRules(BridgeTest):
 class MeetingPrep(BridgeTest):
     """While a meeting is coming up (or its alarm is ringing) the board is told "p 1", so a tap plays meeting prep."""
     def meeting_in(self, secs):
+        with open(bridge.CONFIG_FILE, "w") as f:
+            json.dump({"meeting_countdown": True}, f)
+        self.addCleanup(lambda: os.path.exists(bridge.CONFIG_FILE) and os.remove(bridge.CONFIG_FILE))
         with open(bridge.MEETINGS_FILE, "w") as f:
             json.dump([{"start": self.clock() + secs, "title": "standup"}], f)
+
+    def write_config(self, cfg):
+        with open(bridge.CONFIG_FILE, "w") as f:
+            json.dump(cfg, f)
+        self.addCleanup(lambda: os.path.exists(bridge.CONFIG_FILE) and os.remove(bridge.CONFIG_FILE))
+
+    def test_the_countdown_is_off_unless_switched_on(self):
+        with open(bridge.MEETINGS_FILE, "w") as f:
+            json.dump([{"start": self.clock() + 120, "title": "standup"}], f)
+        self.write_config({})
+        self.assertIsNone(self.b.next_meeting(self.clock()))
+        self.write_config({"calendar_ics": "https://example.com/x.ics"})      # the original setup: on
+        self.assertIsNotNone(self.b.next_meeting(self.clock()))
+        self.write_config({"calendar_ics": "https://example.com/x.ics", "meeting_countdown": False})
+        self.assertIsNone(self.b.next_meeting(self.clock()))
 
     def prep_flags(self):
         return [c for c in self.b.dev.sent if c.startswith("p ")]

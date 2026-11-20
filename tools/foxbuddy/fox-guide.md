@@ -210,6 +210,10 @@ second Mac has its own.
 - Join button: about a minute before a meeting whose invite has a video link (Zoom, Meet, Teams, Webex, any
   https link in its location), the bubble says it's starting with a Join button that opens the link. Right-click
   › Meetings › Offer a Join Button. It needs the calendar check (Google Calendar connected).
+- Count Down to Meetings (He Turns Blue), off unless switched on (right-click › Meetings): over the 10
+  minutes before a meeting his colour slides from orange through pink and purple to electric blue, he
+  plays "meeting time" when it starts, and he stays blue for its first 5 minutes. If he's turned purple or
+  blue, that's why: a meeting is close. (Separately, he turns red as Claude usage limits fill up.)
 - Quiet During Meetings (on by default, right-click › Meetings): while a meeting on the user's calendar is
   going on, he doesn't pop up. Alerts, check-ins and Claude's news wait until it ends (he still acts things
   out, and the chat still opens if the user opens it). He knows the meetings from the same calendar check

@@ -118,6 +118,26 @@ MEETING_LEAD = 10 * 60
 MEETING_ALERT_SECS = 45
 MEETING_HOLD = 5 * 60
 MEETINGS_FILE = os.path.join(HOME, "meetings.json")
+_countdown = [None, None]       # (config.json mtime, answer)
+
+
+def meeting_countdown_on():
+    """The countdown (colour, "meeting time", the meeting mood) is opt-in: config.json "meeting_countdown",
+    which Fox Buddy's right-click > Meetings > Count Down to Meetings sets. With a calendar_ics link (the
+    original desk-buddy setup) it stays on unless switched off."""
+    try:
+        st = os.stat(CONFIG_FILE)
+        mt = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return False
+    if _countdown[0] != mt:
+        try:
+            cfg = json.load(open(CONFIG_FILE))
+        except (OSError, ValueError):
+            cfg = {}
+        v = cfg.get("meeting_countdown")
+        _countdown[:] = [mt, bool(v) if v is not None else bool((cfg.get("calendar_ics") or "").strip())]
+    return _countdown[1]
 CONFIG_FILE = os.path.join(HOME, "config.json")    # {"calendar_ics": "<private iCal link>", "my_email": "..."}
 CALENDAR_EVERY = 5 * 60
 # Sounds: see class Sounds. At night (NIGHT_START..NIGHT_END) he only makes noise if you've been
@@ -1310,6 +1330,8 @@ class Buddy:
             return []
 
     def next_meeting(self, now):
+        if not meeting_countdown_on():
+            return None
         live = [m for m in self.meetings() if m.get("start") and now < m["start"] + MEETING_HOLD]
         return min(live, key=lambda m: m["start"]) if live else None
 

@@ -2123,6 +2123,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
+            "Count Down to Meetings (colour change): \(on(meetingCountdown))",
             "Mac Housekeeping: \(on(housekeeping))",
             "Just for Fun: Jam Along to Music \(on(jamAlong)), Friday at 5 Celebration \(on(celebrations)), Birthdays from Contacts \(on(birthdays))",
             "Focus Timer: sessions of \(focusMinutes) minutes\(focusing ? ", one going now" : ""); \(focusToday().0) finished today",
@@ -3045,6 +3046,27 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             return
         }
     }
+    /// The bridge's countdown (config.json "meeting_countdown"): over the 10 minutes before a meeting his colour
+    /// slides from orange through pink and purple to blue, he plays "meeting time" when it starts, and stays
+    /// blue for its first 5 minutes. Off unless you switch it on (Meetings › Count Down to Meetings).
+    var meetingCountdown: Bool {
+        get {
+            let c = (try? JSONSerialization.jsonObject(with: Data(contentsOf: Setup.runtime.appendingPathComponent("config.json")))) as? [String: Any]
+            if let v = c?["meeting_countdown"] as? Bool { return v }
+            return !((c?["calendar_ics"] as? String) ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        set {
+            let url = Setup.runtime.appendingPathComponent("config.json")
+            var c = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any]) ?? [:]
+            c["meeting_countdown"] = newValue
+            if let d = try? JSONSerialization.data(withJSONObject: c, options: [.prettyPrinted]) { try? d.write(to: url) }
+        }
+    }
+    @objc func toggleMeetingCountdown() {
+        meetingCountdown.toggle()
+        say(meetingCountdown ? "Ten minutes before a meeting I'll start turning blue (by way of pink and purple), and ring when it starts."
+                             : "No more colour countdown before meetings. I'll stay orange.")
+    }
     @objc func toggleJoinButton() {
         joinButton.toggle()
         say(joinButton ? "A minute before a meeting with a video link, I'll put a Join button up." : "No more Join buttons.")
@@ -3153,7 +3175,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func meetingItems() -> [NSMenuItem] {
         var items = [item("Offer Prep Before Meetings", #selector(toggleMeetingPrep), on: meetingPrep),
                      item("Quiet During Meetings", #selector(toggleQuietInMeetings), on: quietInMeetings),
-                     item("Offer a Join Button", #selector(toggleJoinButton), on: joinButton), NSMenuItem.separator(),
+                     item("Offer a Join Button", #selector(toggleJoinButton), on: joinButton),
+                     item("Count Down to Meetings (He Turns Blue)", #selector(toggleMeetingCountdown), on: meetingCountdown), NSMenuItem.separator(),
                      item("Wrap Up My Day Now", #selector(runWrap))]
         for h in [15, 16, 17, 18, 19] {
             items.append(item("Wrap-Up on Weekdays from \(h - 12):00 PM", #selector(pickWrapHour(_:)), on: wrapHour == h, rep: h))
