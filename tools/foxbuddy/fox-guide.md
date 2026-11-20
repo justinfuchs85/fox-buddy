@@ -235,6 +235,14 @@ Every 5 minutes he loads each one. After two failed checks in a row (no answer, 
 long it was down. Check Now checks right away; Stop Watching removes one (the menu marks sites that are
 down). Checks only happen while the Mac is awake.
 
+## Mac Housekeeping
+
+Short heads-ups about the Mac itself, each at most once a day: the battery under 15% and not charging, the
+startup disk nearly full (under 15 GB or 5% free, with See what's using it), a macOS update waiting (with
+Software Update), and the Downloads folder over 5 GB (with Open Downloads). He only mentions them while the
+user is at the Mac, and the disk, update and Downloads ones after 9 AM. Right-click › Mac Housekeeping turns
+them off. He never deletes or installs anything himself.
+
 ## Stretch breaks
 
 After 90 minutes of nonstop keyboard and mouse, he does a big stretch and suggests a break (a quick lap).

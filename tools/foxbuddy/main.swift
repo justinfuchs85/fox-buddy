@@ -1225,7 +1225,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         // The morning check-in: looked at once a minute.
         let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.checkBrief(); self?.checkForUpdate(); self?.checkEmailAlerts()
-            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips(); self?.checkSites()
+            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips(); self?.checkSites(); self?.checkHousekeeping()
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
@@ -1559,6 +1559,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Stretch Breaks", moveItems()))
         m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(sub("Site Checks", siteItems()))
+        m.addItem(item("Mac Housekeeping", #selector(toggleHousekeeping), on: housekeeping))
         m.addItem(item("Look at My Screen", #selector(lookAtScreen)))
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
@@ -2117,6 +2118,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
+            "Mac Housekeeping: \(on(housekeeping))",
             "Site Checks: \(watchSites.isEmpty ? "no sites" : watchSites.compactMap { URL(string: $0)?.host }.joined(separator: ", "))",
             "Ship Watcher: \(shipRepos.isEmpty ? "not watching any repositories" : "watching " + shipRepos.joined(separator: ", "))",
             "Stretch breaks: \(moveEvery == 0 ? "off" : "after \(moveEvery) minutes without a break")",
@@ -2553,6 +2555,86 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         watchSites.removeAll { $0 == site }
         var all = prefs.dictionary(forKey: "siteState") ?? [:]; all[site] = nil; prefs.set(all, forKey: "siteState")
         say("Stopped watching \(URL(string: site)?.host ?? site).")
+    }
+
+    // MARK: Mac housekeeping
+
+    /// Small heads-ups about the Mac itself, each at most once a day: battery under 15% and not charging, the
+    /// startup disk nearly full, a macOS update waiting, Downloads over 5 GB. Right-click › Mac Housekeeping.
+    var housekeeping: Bool {
+        get { prefs.object(forKey: "housekeeping") as? Bool ?? true }
+        set { prefs.set(newValue, forKey: "housekeeping") }
+    }
+    var houseCheckedAt = 0.0
+
+    func checkHousekeeping() {
+        let now = Date().timeIntervalSince1970
+        guard housekeeping, ready, bubble != nil, !hiddenByUser, App.idleSeconds() < 120, now - houseCheckedAt >= 600 else { return }
+        houseCheckedAt = now
+        if let pct = App.batteryPercent(), pct < 15 {
+            tellOnce("battery", "Battery's at \(pct)%. Time to find the charger.", jump: nil)
+            return
+        }
+        if Calendar.current.component(.hour, from: Date()) < 9 { return }
+        if let free = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey]),
+           let avail = free.volumeAvailableCapacityForImportantUsage, let total = free.volumeTotalCapacity,
+           avail < 15_000_000_000 || Double(avail) < Double(total) * 0.05 {
+            tellOnce("disk", "Your Mac's disk is nearly full: \(ByteCountFormatter.string(fromByteCount: avail, countStyle: .file)) left.", jump: ["sys": "storage"], label: "See what's using it")
+            return
+        }
+        if App.updatesWaiting() > 0 {
+            tellOnce("update", "There's a macOS update waiting.", jump: ["sys": "update"], label: "Software Update")
+            return
+        }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let size = App.folderSize(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads"))
+            DispatchQueue.main.async {
+                if size > 5_000_000_000 {
+                    self?.tellOnce("downloads", "Your Downloads folder is up to \(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)). Worth a tidy?", jump: ["sys": "downloads"], label: "Open Downloads")
+                }
+            }
+        }
+    }
+    /// One heads-up per topic per day.
+    func tellOnce(_ topic: String, _ text: String, jump: [String: Any]?, label: String = "") {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        let key = "house." + topic, today = f.string(from: Date())
+        guard prefs.string(forKey: key) != today else { return }
+        prefs.set(today, forKey: key)
+        bubbleJump = jump; bubbleKind = "info"; bubbleMode = "say"
+        var show: [String: Any] = ["text": text, "kind": "info", "jump": jump != nil]
+        if jump != nil { show["jumpLabel"] = label }
+        bubbleJS("bubble.show(\(jsonLiteral(show)))")
+        showBubble(key: false)
+    }
+    /// The battery's charge, if this Mac has one and it isn't plugged in.
+    static func batteryPercent() -> Int? {
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pmset"); p.arguments = ["-g", "batt"]; p.standardOutput = out
+        guard (try? p.run()) != nil else { return nil }
+        p.waitUntilExit()
+        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard text.contains("'Battery Power'"), let r = text.range(of: #"(\d+)%"#, options: .regularExpression) else { return nil }
+        return Int(text[r].dropLast())
+    }
+    /// How many updates Software Update last said are waiting (from its own settings file; no network).
+    static func updatesWaiting() -> Int {
+        let d = NSDictionary(contentsOfFile: "/Library/Preferences/com.apple.SoftwareUpdate.plist")
+        if let n = d?["LastRecommendedUpdatesAvailable"] as? Int { return n }
+        return (d?["RecommendedUpdates"] as? [Any])?.count ?? 0
+    }
+    static func folderSize(_ url: URL) -> Int64 {
+        guard let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey], options: [], errorHandler: nil) else { return 0 }
+        var total: Int64 = 0, n = 0
+        for case let f as URL in e {
+            total += Int64((try? f.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
+            n += 1; if n > 200_000 { break }
+        }
+        return total
+    }
+    @objc func toggleHousekeeping() {
+        housekeeping.toggle()
+        say(housekeeping ? "I'll mention low battery, a full disk, waiting updates and a bulging Downloads folder, once a day at most." : "No more Mac housekeeping from me.")
     }
 
     // MARK: screen sharing
@@ -3366,6 +3448,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func jump(_ j: [String: Any]?) {
         guard let j = j else { return }
         if let key = j["prep"] as? String { runPrep(key); return }
+        if let sys = j["sys"] as? String {
+            let urls = ["storage": "x-apple.systempreferences:com.apple.settings.Storage",
+                        "update": "x-apple.systempreferences:com.apple.Software-Update-Settings.extension"]
+            if sys == "downloads" { NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")) }
+            else if let u = urls[sys].flatMap(URL.init(string:)) { NSWorkspace.shared.open(u) }
+            return
+        }
         if j["snoozeMove"] as? Bool == true {
             activeSince = Date().timeIntervalSince1970 - Double(max(0, moveEvery - 30) * 60)
             say("OK, I'll nudge you again in 30 minutes."); return
