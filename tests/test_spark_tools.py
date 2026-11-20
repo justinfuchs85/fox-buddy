@@ -54,6 +54,14 @@ class SparkTools(unittest.TestCase):
         self.assertEqual(set(ft.SPARK_CHANGE), {"spark_draft", "spark_action"})
         self.assertTrue(all(t["description"].startswith("CHANGE") for t in ft.SPARK_TOOLS if t["name"] in ft.SPARK_CHANGE))
 
+    def test_a_read_only_account_is_explained_not_reported_as_done(self):
+        with open(self.spark, "w") as f:
+            f.write(f"#!{sys.executable}\nprint('This account has read-only access level. Change it in Settings -> AI Agents.')\n")
+        with self.assertRaises(ValueError) as e:
+            ft.spark_tool(self.spark, "spark_action", {"action": "archive", "ids": ["100"]})
+        self.assertIn("triage", str(e.exception))
+        self.assertIn("ok", ft.spark_tool(self.spark, "spark_mail", {"command": "accounts"}) + "ok")   # reading still fine
+
     def test_errors_come_back_plainly(self):
         with self.assertRaises(ValueError) as e:
             ft.spark_tool(self.spark, "spark_mail", {"command": "emails", "target": "Inbox", "options": {"filter": "x"}}) if False else \

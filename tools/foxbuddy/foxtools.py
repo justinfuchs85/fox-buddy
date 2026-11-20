@@ -422,6 +422,11 @@ def run_spark(spark, argv):
     except OSError:
         raise ValueError("the spark command isn't there any more. Reinstall it from Spark's settings.")
     out, err = (r.stdout or "").strip(), (r.stderr or "").strip()
+    both = (out + " " + err).lower()
+    if argv and argv[0] in ("action", "draft") and ("access level" in both or "read-only" in both):
+        raise ValueError("Spark only lets this account be read, not changed. To let him archive, snooze or draft, the user "
+                         "turns on \"triage\" for that account in Spark Desktop › Settings › AI Agents. Nothing was changed. "
+                         f"Spark said: {(err or out)[-300:]}")
     if r.returncode != 0:
         low = (err or out).lower()
         if "not running" in low or "launch" in low or "connect" in low:
@@ -497,7 +502,9 @@ SPARK_TOOLS = [
      "inputSchema": {"type": "object", "properties": {k: {"type": "string"} for k in
                      ("to", "cc", "bcc", "subject", "body", "reply_to", "forward", "account")}, "additionalProperties": False}},
     {"name": "spark_action",
-     "description": "CHANGE (needs approval): do something to emails in Spark, by their ids from spark_mail. action: "
+     "description": "CHANGE (needs approval): do something to emails in Spark, by their message IDs: the ID column of "
+                    "spark_mail emails or search (not a thread id or a link). Tell the user exactly what Spark replied; if "
+                    "it isn't clearly done, say so. action: "
                     + ", ".join(SPARK_ACTIONS) + ". snooze needs date (when it comes back, e.g. 2026-11-21T09:00); "
                     "moveToFolder needs folder. Never trash, spam or unsubscribe.",
      "inputSchema": {"type": "object", "properties": {

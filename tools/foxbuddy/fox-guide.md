@@ -265,6 +265,9 @@ Alerts lists the alerts (Remove "…"), Add an Alert…, Check Now, and how ofte
   to be installed.
 - He seems stuck asleep, or there are two of him: quit Fox Buddy and open it again (only one copy runs).
 - Reminders or Notes say they aren't allowed: System Settings › Privacy & Security › Automation › Fox Buddy.
+- Spark won't let him archive, snooze or draft: Spark gives each account an access level for AI agents,
+  read-only or triage. Changes need triage: Spark Desktop › Settings › AI Agents, for that account (and
+  for a shared inbox, which has its own setting).
 - Spark Mail doesn't work: Spark Desktop has to be open. If Setup › Use Spark Mail isn't in the menu,
   he can't find the `spark` command: `which spark` in Terminal shows where it is, and Report a Problem…
   can say so. If macOS asks whether Fox Buddy may talk to Spark, allow it.
