@@ -76,6 +76,30 @@ Free and open source (MIT), from https://justinfuchs85.github.io/fox-buddy/. mac
 - Activity (steps, workouts): an iPhone Shortcut saves a daily activity summary to iCloud Drive, in a
   `Fox Buddy` folder, and he reads it.
 
+## Claude Code skills, and Spark Mail
+
+Claude Code skills (folders in `~/.claude/skills`, like use-spark) are for Claude Code itself. He doesn't
+load skills in his own chats: a skill can run commands, and he isn't allowed to. Two ways around that:
+
+- Spark Mail is built into him. If the user installed Readdle's use-spark skill, they already have the
+  `spark` command it relies on, and he uses that command directly with his own Spark tools (see Signing in
+  and connecting things). He doesn't need the skill itself, and setting it up for Claude Code doesn't
+  change anything for him.
+- For any other skill, he hands off: Continue in Claude Code opens Claude Code in Terminal, where the
+  user's skills work as usual.
+
+What his Spark tools can do: list and search email in every account in Spark, read whole threads, list
+folders, templates, calendar events and free time, look up contacts and teams, and read meeting
+transcripts and summaries. With the user's OK on a card: save a draft (a new email, a reply or a forward;
+never sent, never shared with a team, no attachments), or archive, snooze, pin, unpin, mute, unmute, set
+aside, mark done or not done, mark seen or unseen, mark or unmark as priority, move to a folder or back to
+the inbox. He can't download attachments, trash, mark as spam, unsubscribe, comment, block or change
+contacts, or do anything for a team (assign, share, delegate).
+
+To get Spark working: install Spark Desktop and its `spark` command (from Readdle), keep Spark Desktop
+open, update Fox Buddy if needed, then right-click › Setup › Use Spark Mail (it only appears once he finds
+the `spark` command, in /opt/homebrew/bin, /usr/local/bin, ~/.local/bin or ~/bin).
+
 ## Chatting with him
 
 - Open the chat: double-click him, press the keyboard shortcut (⌥ Space by default), or right-click ›
@@ -241,6 +265,9 @@ Alerts lists the alerts (Remove "…"), Add an Alert…, Check Now, and how ofte
   to be installed.
 - He seems stuck asleep, or there are two of him: quit Fox Buddy and open it again (only one copy runs).
 - Reminders or Notes say they aren't allowed: System Settings › Privacy & Security › Automation › Fox Buddy.
+- Spark Mail doesn't work: Spark Desktop has to be open. If Setup › Use Spark Mail isn't in the menu,
+  he can't find the `spark` command: `which spark` in Terminal shows where it is, and Report a Problem…
+  can say so. If macOS asks whether Fox Buddy may talk to Spark, allow it.
 - The screen picture fails: System Settings › Privacy & Security › Screen & System Audio Recording ›
   Fox Buddy, then reopen him.
 - Anything else: right-click › Setup › Report a Problem… fills in a GitHub issue with his version and
