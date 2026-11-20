@@ -236,6 +236,13 @@ Alerts lists the alerts (Remove "…"), Add an Alert…, Check Now, and how ofte
   Right-click › Open at Login.
 - Right-click › Gags (A Random Gag, or pick one), Clips (Surprise Me, or pick one) and Show Off (Every Mood,
   on a Loop) play his animations on demand.
+- Screen sharing: while the user shares their screen (Zoom, Teams, Webex, Slack, FaceTime, or Meet in a
+  browser) or presents full screen (Keynote, PowerPoint, a full-screen browser), he hides himself and his
+  bubble, and comes back a few seconds after it ends. Anything he'd have said waits until then. Opening the
+  chat yourself (the keyboard shortcut) still works. Right-click › Hide While I Share My Screen turns it off.
+  He spots shares from the windows on screen: with Screen Recording allowed (for Look at My Screen) he can
+  read the sharing bar's title, which is the most reliable; without it he goes by Zoom's share bar and
+  Teams's red border. If he misses a share in some app, Right-click › Hide works any time.
 - Right-click › Hide hides him; opening Fox Buddy again brings him back. Right-click › Quit Fox Buddy.
 
 ## Privacy: where things go

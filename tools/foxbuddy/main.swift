@@ -1179,6 +1179,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
         let presence = Timer(timeInterval: 30, repeats: true) { [weak self] _ in self?.checkPresence() }
+        let sharing = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.checkSharing() }
+        RunLoop.main.add(sharing, forMode: .common)
         RunLoop.main.add(presence, forMode: .common)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.checkPresence() }
         // Which connectors Claude Code has: shortly after launch, then every 6 hours.
@@ -1518,6 +1520,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Move to", corners.map { item($0.0, #selector(pickCorner(_:)), rep: $0.1) }
                        + [NSMenuItem.separator(), item("Snap to Corners After Dragging", #selector(toggleSnap), on: snap)]))
         m.addItem(item("Float Above Windows", #selector(toggleLayer), on: !onDesktop))
+        m.addItem(item("Hide While I Share My Screen", #selector(toggleHideWhenSharing), on: hideWhenSharing))
         if #available(macOS 13.0, *) {
             m.addItem(item("Open at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         }
@@ -2060,9 +2063,85 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Email alerts: \(every == 0 ? "off" : "checked every \(every) minutes"); watching for: \(watches.isEmpty ? "nothing yet" : watches.joined(separator: "; "))",
             "Size: \(size); Look: \(lookName); Float Above Windows: \(on(!onDesktop)); Snap to Corners: \(on(snap))",
             "Watch the Claude Desktop App: \(on(Setup.watching))",
+            "Hide While I Share My Screen: \(on(hideWhenSharing))\(hiddenForShare ? " (hidden right now: a share or presentation is on)" : "")",
         ]
         if #available(macOS 13.0, *) { lines.append("Open at Login: \(on(SMAppService.mainApp.status == .enabled))") }
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: screen sharing
+
+    /// While you share your screen (Zoom, Teams, Webex, Slack, FaceTime, or Meet in a browser) or present full
+    /// screen (Keynote, PowerPoint, a browser), he steps off stage: his window and bubble hide, and come back a few
+    /// seconds after. Anything he'd have said meanwhile waits (heldBubble). Right-click › Hide While I Share My Screen.
+    var hiddenForShare = false, shareClearSince = 0.0, heldBubble = false
+    var hideWhenSharing: Bool {
+        get { prefs.object(forKey: "hideWhenSharing") as? Bool ?? true }
+        set { prefs.set(newValue, forKey: "hideWhenSharing") }
+    }
+    static let CALL_APPS = ["zoom.us", "Microsoft Teams", "Microsoft Teams (work or school)", "MSTeams", "Webex", "Cisco Webex Meetings",
+                            "Slack", "FaceTime", "Around", "Discord", "Google Chrome", "Safari", "Arc", "Microsoft Edge", "Firefox", "Brave Browser"]
+    static let SHOW_APPS = ["Keynote", "Microsoft PowerPoint", "Google Chrome", "Safari", "Arc", "Microsoft Edge", "Firefox", "Brave Browser", "Pitch"]
+
+    /// Is a screen share or a full-screen presentation on right now? From the list of windows on screen: a sharing
+    /// toolbar or banner by its title (titles are readable once you've allowed Screen Recording, for Look at My
+    /// Screen), or, without titles, Zoom's or Teams's floating share bar; and a presentation app's window that
+    /// covers a whole display while it's in front.
+    static func sharingNow() -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+        let me = ProcessInfo.processInfo.processIdentifier
+        let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+        let screens = NSScreen.screens.map { $0.frame.size }
+        let shareWords = try? NSRegularExpression(pattern: "(is sharing|sharing your screen|screen sharing|share toolbar|you are (screen )?sharing|you're sharing|stop shar|presenting)", options: .caseInsensitive)
+        for w in list {
+            guard (w[kCGWindowOwnerPID as String] as? Int32) != me, let owner = w[kCGWindowOwnerName as String] as? String else { continue }
+            let title = w[kCGWindowName as String] as? String ?? ""
+            let layer = w[kCGWindowLayer as String] as? Int ?? 0
+            var r = CGRect.zero
+            if let b = w[kCGWindowBounds as String] as? NSDictionary { _ = CGRectMakeWithDictionaryRepresentation(b, &r) }
+            if CALL_APPS.contains(owner), !title.isEmpty, let re = shareWords,
+               re.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) != nil { return true }
+            if (owner == "zoom.us" && title.isEmpty && layer > 0 && r.width > 300 && r.height < 120) { return true }   // Zoom's share bar
+            if owner.hasPrefix("Microsoft Teams") || owner == "MSTeams", layer > 0, screens.contains(where: { abs($0.width - r.width) < 2 && abs($0.height - r.height) < 2 }) {
+                return true                                                       // Teams's red border around a shared screen
+            }
+            if SHOW_APPS.contains(owner), owner == front, layer == 0,
+               screens.contains(where: { abs($0.width - r.width) < 2 && abs($0.height - r.height) < 2 }) { return true }
+        }
+        return false
+    }
+
+    /// Every 2 seconds: step off stage when a share starts; back 3 seconds after it ends.
+    func checkSharing() {
+        guard ready, panel != nil else { return }
+        let sharing = hideWhenSharing && App.sharingNow()
+        let now = Date().timeIntervalSince1970
+        if sharing {
+            shareClearSince = 0
+            guard !hiddenForShare else { return }
+            hiddenForShare = true
+            panel.orderOut(nil)
+            if bubble?.isVisible == true { heldBubble = bubbleMode != "none"; bubble.orderOut(nil) }
+        } else if hiddenForShare {
+            if shareClearSince == 0 { shareClearSince = now; return }
+            guard now - shareClearSince >= 3 else { return }
+            hiddenForShare = false
+            if !hiddenByUser { panel.orderFrontRegardless() }
+            releaseHeld()
+        }
+    }
+
+    /// Is he keeping quiet right now (sharing, or a meeting)? A bubble that would pop up waits until he isn't.
+    var keepingQuiet: Bool { hiddenForShare }
+    func releaseHeld() {
+        guard heldBubble, !keepingQuiet, !hiddenByUser, bubbleMode != "none" else { return }
+        heldBubble = false
+        showBubble(key: false)
+    }
+    @objc func toggleHideWhenSharing() {
+        hideWhenSharing.toggle()
+        if !hideWhenSharing && hiddenForShare { hiddenForShare = false; if !hiddenByUser { panel.orderFrontRegardless() }; releaseHeld() }
+        say(hideWhenSharing ? "I'll step out of the picture while you share your screen or present." : "I'll stay put when you share your screen.")
     }
 
     // MARK: meetings
@@ -2444,6 +2523,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
 
     func showBubble(key: Bool) {
+        if keepingQuiet && !key { heldBubble = true; return }      // sharing or in a meeting: it waits (you opening it doesn't)
         bubbleJS("bubble.shown()")
         placeBubble()
         if key { bubble.makeKeyAndOrderFront(nil); bubble.makeFirstResponder(bubbleWeb) } else { bubble.orderFrontRegardless() }
