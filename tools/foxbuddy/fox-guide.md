@@ -207,6 +207,9 @@ second Mac has its own.
 - End-of-day wrap-up: on weekdays from 5 PM, the first time the user is at the Mac, email that still needs
   a reply, tomorrow's first meetings and reminders due. Right-click › Meetings: Wrap Up My Day Now, the
   start time (3 to 7 PM), or No Wrap-Up.
+- Join button: about a minute before a meeting whose invite has a video link (Zoom, Meet, Teams, Webex, any
+  https link in its location), the bubble says it's starting with a Join button that opens the link. Right-click
+  › Meetings › Offer a Join Button. It needs the calendar check (Google Calendar connected).
 - Quiet During Meetings (on by default, right-click › Meetings): while a meeting on the user's calendar is
   going on, he doesn't pop up. Alerts, check-ins and Claude's news wait until it ends (he still acts things
   out, and the chat still opens if the user opens it). He knows the meetings from the same calendar check
