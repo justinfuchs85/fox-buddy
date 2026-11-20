@@ -348,7 +348,13 @@ Alerts lists the alerts (Remove "…"), Add an Alert…, Check Now, and how ofte
   He spots shares from the windows on screen: with Screen Recording allowed (for Look at My Screen) he can
   read the sharing bar's title, which is the most reliable; without it he goes by Zoom's share bar and
   Teams's red border. If he misses a share in some app, Right-click › Hide works any time.
-- Right-click › Hide hides him; opening Fox Buddy again brings him back. Right-click › Quit Fox Buddy.
+- Right-click › Hide Behind the Dock: he ducks down behind the Dock (or the bottom edge of the screen, if the
+  Dock is on a side or hidden) and peeks over it with just his eyes, ears and paws showing, ducking down now
+  and then. While hiding he keeps quiet, like Hide Completely (his news waits). Click him, choose Come Back
+  Out (same menu spot), or open Fox Buddy again and he hops back to where he was; dragging him out puts him
+  wherever he's dropped.
+- Right-click › Hide Completely hides him entirely; opening Fox Buddy again brings him back. Right-click ›
+  Quit Fox Buddy.
 
 ## Just for fun
 

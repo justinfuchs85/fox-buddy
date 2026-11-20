@@ -108,7 +108,7 @@ class AboutFoxBuddy(unittest.TestCase):
         titles = set(re.findall(r'(?:item|sub)\("([^"\\]+)"', menu))
         touches = swift[swift.index("    func touchItems()"):swift.index("    /// Downloads and screenshots")]
         titles |= set(re.findall(r'\("\w+", "([^"]+)"\)', touches))
-        titles -= {"Off", "Tap", "Hide (Open Fox Buddy Again to Bring Him Back)", "No alerts yet",
+        titles -= {"Off", "Tap", "Hide Completely (Open Fox Buddy Again to Bring Him Back)", "No alerts yet",
                    "Ask a Question… (or Double-Click Him)"}                       # named differently, or nothing to explain
         guide = " ".join(open(GUIDE, encoding="utf-8").read().split())
         missing = sorted(t for t in titles if t not in guide)

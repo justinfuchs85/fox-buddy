@@ -615,6 +615,16 @@
   // lantern: true (dark mode at night: a glowing lantern on the floor beside him); swatch: '#rrggbb' (a paint chip
   // of a colour you copied); sign: 'text' (a placard on a stick: a countdown); parcel: 0..1 (a download dropping
   // in, then sitting by his feet); flash: 0..1 (a camera flash fading: a screenshot).
+  // Two paws hooked over the edge he's hiding behind; they slide down with him when he ducks.
+  function drawPeekPaws(c, pk, seed) {
+    const y = pk.line + Math.max(0, (pk.dip || 0) - 14) * 0.6;
+    if (y > pk.line + 12) return;
+    for (const [x, k] of [[pk.left ?? 98, 0], [pk.right ?? 142, 1]]) {
+      part(c, oval(x, y - 3, 14, 9.5, 14), DARK, seed + 1100 + k, { width: 3 });
+      for (const dx of [-5, 0, 5]) stroke(c, [[x + dx, y - 10], [x + dx * 1.1, y - 6]], seed + 1110 + k * 3 + dx, 1.8, CREAM);
+    }
+  }
+
   function drawAccessories(c, X, tick, seed) {
     const t = tick / 24;
     if (X.lantern) {
@@ -686,9 +696,12 @@
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = F.line === 'paper' ? F.PAPER_BG : '#000'; c.fillRect(0, 0, 240, 240);
     // (the rig draws his floor shadow first: the app relies on the first fill of a frame being the shadow)
+    const pk = opts.peek;                                  // hiding behind the Dock: only what's above the edge, then his paws on it
+    if (pk) { c.save(); c.beginPath(); c.rect(-60, -60, 360, pk.line + 60); c.clip(); c.translate(0, pk.dip || 0); }
     R.draw(c, Object.assign({}, P, { front: (cc, a, s, t) => drawExtras(cc, P, a, s, t) }), seed, tick);
     if (P.prop === 'moon') PROPS.moon(c, P, null, seed);
-    if (!opts.noFX) drawFX(c, P.fx || 'none', P, tick, seed);
+    if (!opts.noFX && !pk) drawFX(c, P.fx || 'none', P, tick, seed);
+    if (pk) { c.restore(); drawPeekPaws(c, pk, seed); return; }
     if (opts.extras) drawAccessories(c, opts.extras, tick, seed);
   }
 

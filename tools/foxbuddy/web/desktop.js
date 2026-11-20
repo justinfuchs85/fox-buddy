@@ -379,6 +379,25 @@
     }
   }
 
+  // Hiding behind the Dock: the app parks his window so the edge is at PEEK_LINE; he peeks over it with his
+  // paws hooked on, rises into view when he starts, and every so often ducks down and comes back up.
+  const PEEK_LINE = 142;
+  let peekFrom = 0, nextDuck = 0;
+  function peekNow(now) {
+    if (!peekFrom) return null;
+    const age = (now - peekFrom) / 1000;
+    let dip = age < 0.7 ? (1 - age / 0.7) ** 2 * 130 : 0;                    // rising up into view
+    if (!nextDuck) nextDuck = now + 9000 + Math.random() * 8000;
+    const d = (now - nextDuck) / 1000;
+    if (d > 0) {
+      if (d < 0.25) dip = Math.max(dip, d / 0.25 * 70);
+      else if (d < 1.4) dip = 70;
+      else if (d < 1.9) dip = 70 * (1 - (d - 1.4) / 0.5) ** 2;
+      else nextDuck = now + 9000 + Math.random() * 9000;
+    }
+    return { line: PEEK_LINE, dip: Math.round(dip) };
+  }
+
   let lastFade = 0, dimNow = 1;
   function frame() {
     rAF(frame);
@@ -400,8 +419,8 @@
     canvas.style.opacity = dimNow.toFixed(3);
     const ov = offlineMark(now) || ovWorking || ovWaiting || ovUnseen;
     const g = gazeNow(now);
-    const xk = extrasKey(now);
-    const key = `${cur.key}|${xk}|${tick}|${hex(tintNow)}|${look}|${ov ? Math.floor(now / 100) : ''}|${g ? g.map(v => v.toFixed(2)).join(',') : ''}`;
+    const xk = extrasKey(now), pk = peekNow(now);
+    const key = `${cur.key}|${xk}|${pk ? pk.dip : ''}|${tick}|${hex(tintNow)}|${look}|${ov ? Math.floor(now / 100) : ''}|${g ? g.map(v => v.toFixed(2)).join(',') : ''}`;
     if (key === lastKey) return;
     lastKey = key;
     L.setTint(hex(tintNow)); L.setLine(look === 'ink' ? 'paper' : 'glow');
@@ -411,8 +430,8 @@
     if (look === 'glass') { raw.beginPath(); raw.roundRect(0, 0, canvas.width, canvas.height, canvas.width * 0.09); raw.clip(); }
     try {
       const extras = extrasNow(now);
-      if (cur.kind === 'loop') L.render(ctx, cur.from, id, tick, { dim: false, gaze: g, extras });
-      else L.render(ctx, L.fxFor(id), id, tick, { dim: false, extras });
+      if (cur.kind === 'loop') L.render(ctx, cur.from, id, tick, { dim: false, gaze: g, extras, peek: pk });
+      else L.render(ctx, L.fxFor(id), id, tick, { dim: false, extras, peek: pk });
     } catch (e) { console.error('render', cur.key, id, e); }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (ov) drawOverlay(now);
@@ -444,6 +463,8 @@
     line, tap, wake, watch, follow, hold, setLook, said, hit, act: setAct, present: setPresent,
     play: n => playEvent(String(n)),
     extra: (kind, value, ms) => setExtra(String(kind), value, +ms || 0),
+    peek: on => { peekFrom = on ? millis() : 0; nextDuck = 0; lastKey = ''; },   // hiding behind the Dock (the app moves the window)
+    peekLine: () => PEEK_LINE,
     face: d => { facing = d < 0 ? -1 : 1; canvas.style.transform = facing < 0 ? 'translateX(-50%) scaleX(-1)' : ''; },   // which way he's walking (keeps start.js's centring)
     setCalm: on => { calm = !!on; if (!calm) { queued = null; clearTimeout(queueTimer); } },
     unhold: m => { if (holdMood === m) { holdUntil = 0; want(asked); } },   // end a hold, if it's still that one (music stopped)          // one of his clips by name (stretch: the version for whatever mood he's in)

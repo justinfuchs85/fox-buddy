@@ -611,13 +611,13 @@ final class CapturePanel: NSPanel, NSTextFieldDelegate {
         bg.addSubview(field); bg.addSubview(result); bg.addSubview(hint)
     }
 
-    func open() { field.stringValue = ""; update(); makeKeyAndOrderFront(nil); makeFirstResponder(field) }
-    func update() {
+    func open() { field.stringValue = ""; refreshPreview(); makeKeyAndOrderFront(nil); makeFirstResponder(field) }
+    func refreshPreview() {
         let (r, h) = preview?(field.stringValue) ?? ("", "")
         result.stringValue = r; hint.stringValue = h
         result.textColor = field.stringValue.trimmingCharacters(in: .whitespaces).isEmpty ? .secondaryLabelColor : .labelColor
     }
-    func controlTextDidChange(_ obj: Notification) { update() }
+    func controlTextDidChange(_ obj: Notification) { refreshPreview() }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
         if sel == #selector(NSResponder.insertNewline(_:)) || sel == #selector(NSResponder.insertLineBreak(_:))
@@ -1539,6 +1539,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     @objc func pickBriefHour(_ s: NSMenuItem) { if let v = s.representedObject as? Int { briefHour = v } }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if peeking { endPeek(); return false }
         hiddenByUser = false; panel.orderFrontRegardless(); return false      // opening the app again brings him back
     }
 
@@ -1568,8 +1569,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
         grab = GrabView(frame: content.bounds)
         grab.autoresizingMask = [.width, .height]
-        grab.onTap = { [weak self] in self?.js("desk.tap()") }
-        grab.onDoubleClick = { [weak self] in self?.openAsk() }
+        grab.onTap = { [weak self] in guard let self = self else { return }; if self.peeking { self.endPeek() } else { self.js("desk.tap()") } }
+        grab.onDoubleClick = { [weak self] in guard let self = self else { return }; if self.peeking { self.endPeek() } else { self.openAsk() } }
         grab.registerForDraggedTypes(Drops.types)
         grab.onDrop = { [weak self] pb in self?.dropped(pb) }
         grab.onMenu = { [weak self] e in guard let self = self else { return }; NSMenu.popUpContextMenu(self.menu(), with: e, for: self.grab) }
@@ -1635,11 +1636,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         return NSPoint(x: prefs.double(forKey: "x"), y: prefs.double(forKey: "y"))
     }
     func saveOrigin() {
-        if wandering { placeBubble(); return }                    // out wandering: home stays where it was
+        if wandering || peeking { placeBubble(); return }                    // out wandering: home stays where it was
         prefs.set(Double(panel.frame.minX), forKey: "x"); prefs.set(Double(panel.frame.minY), forKey: "y"); placeBubble()
     }
 
     func moved() {
+        if peeking { endPeek(goHome: false) }                    // dragged out of hiding: wherever he's put is home
         if wandering { stopTravel(); wandering = false; perchWindow = nil; js("desk.face(1)"); js("desk.unhold('hop')") }
         if snap {
             let f = visibleFrame(), mid = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
@@ -1658,6 +1660,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     /// Keep him wholly on a screen (a monitor was unplugged, or he was dragged half off).
     func clampOnScreen() {
+        if peeking { panel.setFrameOrigin(peekOrigin()); return }
         let f = visibleFrame(), r = panel.frame
         let x = min(max(r.minX, f.minX), f.maxX - r.width), y = min(max(r.minY, f.minY), f.maxY - r.height)
         if x != r.minX || y != r.minY { panel.setFrameOrigin(NSPoint(x: x, y: y)) }
@@ -1862,7 +1865,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         setupItems.append(item("Check for Updates…", #selector(checkUpdates)))
         setupItems.append(item("Report a Problem…", #selector(reportProblem)))
         m.addItem(sub("Setup", setupItems))
-        m.addItem(item("Hide (Open Fox Buddy Again to Bring Him Back)", #selector(hideHim)))
+        m.addItem(item(peeking ? "Come Back Out" : "Hide Behind the Dock", #selector(togglePeek)))
+        m.addItem(item("Hide Completely (Open Fox Buddy Again to Bring Him Back)", #selector(hideHim)))
         m.addItem(item("Quit Fox Buddy", #selector(quit), key: "q"))
         return m
     }
@@ -2248,7 +2252,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             } catch { NSLog("foxbuddy: login item: \(error)") }
         }
     }
-    @objc func hideHim() { hiddenByUser = true; panel.orderOut(nil); hideBubble() }
+    @objc func hideHim() {
+        if peeking { endPeek(goHome: false); panel.setFrameOrigin(peekHome) }
+        hiddenByUser = true; panel.orderOut(nil); hideBubble()
+    }
     @objc func askFromMenu() { openAsk() }
     @objc func pickNarrate(_ s: NSMenuItem) {
         guard let v = s.representedObject as? String else { return }
@@ -3425,7 +3432,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
 
     @objc func wanderNow() {
-        guard !wandering, let spot = perchSpot() else { return }
+        guard !wandering, !peeking, let spot = perchSpot() else { return }
         wandering = true; wanderHome = panel.frame.origin; perchWindow = (spot.id, spot.frame)
         let floor = NSPoint(x: spot.origin.x, y: wanderHome.y)
         var legs: [(from: NSPoint, to: NSPoint, secs: Double, jump: Bool)] = []
@@ -3494,6 +3501,49 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         wanderOn.toggle()
         if !wanderOn { wanderHomeNow() }
         say(wanderOn ? "Every so often I'll hop over and sit on the window you're in. Drag me anywhere to change where home is." : "I'll stay in my corner.")
+    }
+
+    // MARK: hiding behind the Dock
+
+    /// Right-click › Hide Behind the Dock: he ducks behind the Dock (or the bottom of the screen) and peeks over
+    /// it, eyes and paws showing, ducking now and then. He keeps quiet like a hidden fox; a click brings him back.
+    var peeking = false, peekHome = NSPoint.zero
+    static let PEEK_LINE: CGFloat = 142.0 / 240.0       // where the edge crosses his window, from the top (desktop.js PEEK_LINE)
+
+    /// His head over the Dock's top edge if the Dock is along the bottom (a little off the middle, where the
+    /// Dock always is); otherwise over the bottom of the screen, right below where he was.
+    func peekOrigin() -> NSPoint {
+        let mid = NSPoint(x: peekHome.x + panel.frame.width / 2, y: peekHome.y + panel.frame.height / 2)
+        let s = NSScreen.screens.first { $0.frame.contains(mid) } ?? NSScreen.main ?? NSScreen.screens[0]
+        let f = s.frame, v = s.visibleFrame, side = panel.frame.width
+        let dockAtBottom = v.minY - f.minY > 8
+        let y = (dockAtBottom ? v.minY : f.minY) - side * (1 - App.PEEK_LINE)
+        let x = dockAtBottom ? f.midX + (mid.x < f.midX ? -1 : 1) * min(110, f.width * 0.08) - side / 2
+                             : min(max(peekHome.x, f.minX), f.maxX - side)
+        return NSPoint(x: x, y: y)
+    }
+    @objc func togglePeek() { peeking ? endPeek() : startPeek() }
+    func startPeek() {
+        guard !peeking, panel != nil else { return }
+        if wandering { wanderHomeNow(teleport: true) }
+        hideBubble()
+        peekHome = panel.frame.origin
+        peeking = true; hiddenByUser = true
+        js("desk.face(1)"); js("desk.hold('idle', 86400000)")
+        js("desk.peek(true)")                                   // he sinks out of sight first...
+        panel.setFrameOrigin(peekOrigin())                     // ...and rises up behind the Dock
+        panel.orderFrontRegardless()
+    }
+    /// Out of hiding: a hop back up to where he was (goHome false: he's already being put somewhere).
+    func endPeek(goHome: Bool = true) {
+        guard peeking else { return }
+        peeking = false; hiddenByUser = false
+        js("desk.peek(false)"); js("desk.unhold('idle')")
+        guard goHome else { return }
+        travel([(panel.frame.origin, peekHome, 0.75, true)]) { [weak self] in
+            guard let self = self else { return }
+            self.js("desk.face(1)"); self.js("desk.wake()"); self.saveOrigin()
+        }
     }
 
     // MARK: just the fox (no Claude)
@@ -3817,7 +3867,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             if shareClearSince == 0 { shareClearSince = now; return }
             guard now - shareClearSince >= 3 else { return }
             hiddenForShare = false
-            if !hiddenByUser { panel.orderFrontRegardless() }
+            if !hiddenByUser || peeking { panel.orderFrontRegardless() }
             releaseHeld()
         } else if heldBubble && !keepingQuiet {
             releaseHeld()                                          // a meeting just ended
@@ -3853,7 +3903,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
     @objc func toggleHideWhenSharing() {
         hideWhenSharing.toggle()
-        if !hideWhenSharing && hiddenForShare { hiddenForShare = false; if !hiddenByUser { panel.orderFrontRegardless() }; releaseHeld() }
+        if !hideWhenSharing && hiddenForShare { hiddenForShare = false; if !hiddenByUser || peeking { panel.orderFrontRegardless() }; releaseHeld() }
         say(hideWhenSharing ? "I'll step out of the picture while you share your screen or present." : "I'll stay put when you share your screen.")
     }
 
@@ -4148,7 +4198,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
                 do { try p.run(); p.waitUntilExit() } catch { NSLog("foxbuddy: screencapture didn't start: \(error)") }
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    if !self.hiddenByUser { self.panel.orderFrontRegardless() }
+                    if !self.hiddenByUser || self.peeking { self.panel.orderFrontRegardless() }
                     let got = files.filter { fm.fileExists(atPath: $0) }
                     for f in got { try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: f) }
                     self.openAsk()
