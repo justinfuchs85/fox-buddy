@@ -35,6 +35,11 @@ justinfuchs85/fox-buddy/fox-buddy`. His chat needs Claude Pro or Max; he install
   arrives: he checks every 15 minutes while you're at your Mac (right-click › Email Alerts). About ten
   minutes before a meeting he offers to **prep you** for it, on weekdays at 5 PM he **wraps up your day**,
   and when a Claude Code job has run for a few minutes he **recaps** what got done.
+- **Steps aside and keeps an eye on things**: hides while you share your screen or present, stays quiet
+  during meetings and focus sessions, puts up a Join button before calls, captures a thought with ⌃⌥ C,
+  suggests stretch breaks, flags low battery, a full disk or a heavy Downloads folder, watches your
+  websites and GitHub releases (an "It's live!" flag), and holds a boombox overhead while music plays.
+  Shortcuts can drive him with `foxbuddy://` links. Everything's in his right-click menu.
 - **Looks at your screen, only when you ask**: his bubble's screen button (or right-click › Look at My
   Screen) attaches a picture of your screen to the chat, without him in it. It goes nowhere until you
   send a message, and you can remove it first.
