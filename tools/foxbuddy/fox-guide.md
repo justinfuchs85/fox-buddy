@@ -339,6 +339,15 @@ Right-click › Just for Fun:
   birthday, the first time the user is at the Mac after 8 AM, he celebrates and says whose birthday it
   is. Contacts never leave the Mac.
 
+## Liveliness
+
+Right-click › Liveliness: Calm (the default) or Lively. Calm keeps him lively without constant switching:
+he stays in each mood at least 10 seconds (anything that needs the user still shows right away), celebrates
+once at the end of a real stretch of Claude's work instead of after every turn, does an idle bit every 4 to
+6 minutes instead of every minute, plays event clips (tests passed, pushed) at most every 10 minutes,
+glances where the pointer stops instead of following every movement, and lets the boombox settle for a few
+seconds before it appears or goes. Lively is the original, busier pace.
+
 ## Privacy: where things go
 
 - To Anthropic, through Claude Code, under the user's own Claude account: chats, and whatever he looks

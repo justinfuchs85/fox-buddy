@@ -43,6 +43,9 @@ class Clock:
     def advance(self, s): self.t += s
 
 
+REAL_CALM = bridge.calm
+
+
 class BridgeTest(unittest.TestCase):
     def setUp(self):
         for f in os.listdir(HOME):
@@ -50,6 +53,9 @@ class BridgeTest(unittest.TestCase):
         self.clock = Clock(NOON)
         p = mock.patch.object(bridge.time, "time", self.clock)
         p.start(); self.addCleanup(p.stop)
+        self.calm = False                  # these tests were written for the Lively pace; Calm has its own below
+        c = mock.patch.object(bridge, "calm", lambda: self.calm)
+        c.start(); self.addCleanup(c.stop)
         self.b = self.make()
 
     def make(self):
@@ -60,6 +66,37 @@ class BridgeTest(unittest.TestCase):
 
     def mood(self):
         return self.b.mood()
+
+
+class Calm(BridgeTest):
+    """Calm (the default): a run of quick turns ends with one celebration; short turns don't celebrate at all."""
+    def setUp(self):
+        super().setUp()
+        self.calm = True
+
+    def turn(self, secs, gap=5):
+        self.hook("UserPromptSubmit", "a"); self.clock.advance(secs); self.hook("Stop", "a"); self.clock.advance(gap)
+
+    def test_quick_turns_dont_celebrate(self):
+        self.turn(10, gap=0)
+        self.assertNotEqual(self.mood(), "done")
+
+    def test_a_run_of_quick_turns_celebrates_once_at_the_end(self):
+        for _ in range(4):
+            self.turn(15)                  # 4 turns, 5 s apart: one run of ~75 s
+        self.clock.advance(-5)
+        self.hook("UserPromptSubmit", "a"); self.clock.advance(5); self.hook("Stop", "a")
+        self.assertEqual(self.mood(), "done")
+
+    def test_idle_bits_are_minutes_apart(self):
+        self.assertGreaterEqual(bridge.idle_every(), 240)
+        self.assertGreaterEqual(bridge.fidget_every(), 15 * 60)
+
+    def test_the_default_is_calm_and_lively_is_a_setting(self):
+        with mock.patch.object(bridge, "read_config", lambda: {}):
+            self.assertTrue(REAL_CALM())
+        with mock.patch.object(bridge, "read_config", lambda: {"liveliness": "lively"}):
+            self.assertFalse(REAL_CALM())
 
 
 class MoodRules(BridgeTest):

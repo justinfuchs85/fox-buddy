@@ -176,6 +176,26 @@ LINK = {"kind": None}                             # what the bridge is talking t
 # otherwise one of his own fidgets (the board leaves fidgeting to the bridge while it's connected).
 CLIP_GAP = 120
 IDLE_EVERY = (50, 70)
+# Calm (the default; config.json "liveliness": "lively" for the old pace): an idle bit every 4-6 minutes, a fidget
+# every 15-25, event clips (tests passed, pushed) at most every 10 minutes, and no celebration for a turn shorter
+# than CALM_CELEBRATE_AFTER: a run of quick turns ends with one celebration, not one each.
+CALM_IDLE_EVERY = (240, 360)
+CALM_FIDGET_EVERY = (15 * 60, 25 * 60)
+CALM_CLIP_GAP = 10 * 60
+CALM_CELEBRATE_AFTER = 45
+CALM_STREAK_GAP = 20                    # a new prompt this soon after a finish continues the same run of work
+
+
+def calm():
+    return read_config().get("liveliness", "calm") != "lively"
+
+
+def idle_every():
+    return random.uniform(*(CALM_IDLE_EVERY if calm() else IDLE_EVERY))
+
+
+def fidget_every():
+    return random.uniform(*(CALM_FIDGET_EVERY if calm() else FIDGET_EVERY))
 FIDGETS = ["fidget_toss", "fidget_twitch", "fidget_bubble"]
 CLIP_EVERY = {"done": 10 * 60, "waiting": 3 * 60, "limit": 60 * 60}    # least time between two of a kind
 CLIP_COMMANDS = [                       # a Bash command Claude ran: (pattern, clip if it worked, clip if it failed)
@@ -914,7 +934,7 @@ class Buddy:
         self.goodnight_night = None    # which night we've already said goodnight for
         self.woke_at = 0.0
         self.working_since, self.long_played = None, False
-        self.next_fidget = time.time() + random.uniform(*FIDGET_EVERY)
+        self.next_fidget = time.time() + fidget_every()
         self.focus = focus or Focus()
         self.meeting_dismissed = set()            # meeting starts you've tapped to silence
         self.last_beat = 0.0
@@ -926,7 +946,7 @@ class Buddy:
         self.clip_days = {}                       # time-of-day clip -> the day it last played
         self.meeting_clipped = set()              # meeting starts he's already done a clip for
         self.taps_loaded = 0.0
-        self.next_idle = time.time() + random.uniform(*IDLE_EVERY)
+        self.next_idle = time.time() + idle_every()
         self.load_state()
         self.dev = dev or Device(self.resend, self.board_line)
         if start:
@@ -1000,6 +1020,8 @@ class Buddy:
             elif ev == "UserPromptSubmit":
                 state = "working"
                 s["asked"] = now                # for a recap, if this turn runs long
+                if now - s.get("done_at", 0) > CALM_STREAK_GAP or "run_start" not in s:
+                    s["run_start"] = now        # a new run of work (a quick follow-up continues the last one)
                 s.pop("unseen", None)           # you're back in this session: result seen
                 self.last_active = now
                 self.sound("on_it")
@@ -1209,7 +1231,12 @@ class Buddy:
                 s["unseen"] = now                   # finished while you weren't looking at it
             # celebrate briefly if other things are still going on, longer if it's all quiet
             busy = self.base_locked(now, skip=s) in ("alert", "working")
-            self.celebrate_until = max(self.celebrate_until, now + (CELEBRATE_SECS if busy else DONE_SECS))
+            run = now - s.get("run_start", now)
+            if not calm():
+                self.celebrate_until = max(self.celebrate_until, now + (CELEBRATE_SECS if busy else DONE_SECS))
+            elif not busy and run >= CALM_CELEBRATE_AFTER:
+                self.celebrate_until = max(self.celebrate_until, now + DONE_SECS)      # the end of a real stretch of work
+            s["done_at"] = now
             if not watching:                        # you can already see that reply: no need to call out
                 self.sound("finished_while_busy" if busy else "finished")
             else:
@@ -1462,7 +1489,7 @@ class Buddy:
             else:
                 self.working_since, self.long_played = None, False
             if now >= self.next_fidget:
-                self.next_fidget = now + random.uniform(*FIDGET_EVERY)
+                self.next_fidget = now + fidget_every()
                 if base == "idle" and now - self.last_active < 30 * 60:   # only if you're around
                     play.append("fidget")
         for moment in dict.fromkeys(play):
@@ -1471,7 +1498,7 @@ class Buddy:
     def event(self, name):
         # an event plays in its home mood (oops: working, hello: idle); the board walks
         # there by itself, so re-assert our mood once it has finished
-        self.next_idle = time.time() + random.uniform(*IDLE_EVERY)      # whatever it is, it counts as his thing for this minute
+        self.next_idle = time.time() + idle_every()      # whatever it is, it counts as his thing for this minute
         if self.dev.send("e " + name):
             self.resync_at = time.time() + 8
             return True
@@ -1499,7 +1526,7 @@ class Buddy:
             return None
         with self.lock:
             mood = self.mood_locked(now)
-            if (now - self.last_clip < CLIP_GAP or now - self.clip_kind.get(kind, 0) < CLIP_EVERY.get(kind, 0)
+            if (now - self.last_clip < (CALM_CLIP_GAP if calm() else CLIP_GAP) or now - self.clip_kind.get(kind, 0) < CLIP_EVERY.get(kind, 0)
                     or mood in ("night", "meeting") or (mood == "alert" and kind != "waiting")):
                 return None
             name = random.choice([n for n in have if n not in self.recent_clips] or have)
@@ -1531,10 +1558,10 @@ class Buddy:
         with self.lock:
             idle = self.mood_locked(now) == "idle"
             if not idle:
-                self.next_idle = now + random.uniform(*IDLE_EVERY)
+                self.next_idle = now + idle_every()
             if not idle or now < self.next_idle:
                 return
-            self.next_idle = now + random.uniform(*IDLE_EVERY)
+            self.next_idle = now + idle_every()
             pool = [n for n in CLIP_SETS["idle"] if n in clip_names()] if around and read_config().get("auto_clips") is not False else []
             name = random.choice([n for n in pool + FIDGETS if n not in self.recent_clips] or FIDGETS)
             self.recent_clips = (self.recent_clips + [name])[-20:]

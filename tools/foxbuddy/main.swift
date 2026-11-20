@@ -1447,8 +1447,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// Tell him where the pointer is, relative to his head, whenever it moves. desktop.js only looks when
     /// he's awake with nothing to do. Direction is -1..1 each way (up negative), and shrinks as the pointer
     /// gets close, so a pointer right beside him gets a small glance, not eyes rolled to the edge.
-    var lastPointer = NSPoint(x: -1e6, y: -1e6)
+    var lastPointer = NSPoint(x: -1e6, y: -1e6), seenPointer = NSPoint.zero, pointerMovedAt = 0.0, calmGaze = true
     func followPointer(_ p: NSPoint, _ f: NSRect) {
+        let now = Date().timeIntervalSince1970
+        if abs(p.x - seenPointer.x) + abs(p.y - seenPointer.y) > 3 { seenPointer = p; pointerMovedAt = now }
+        if calmGaze && now - pointerMovedAt < 0.5 { return }          // Calm: glance where it stops, don't track it
         guard abs(p.x - lastPointer.x) + abs(p.y - lastPointer.y) > 3 else { return }
         lastPointer = p
         let head = NSPoint(x: f.midX, y: f.maxY - f.height * 0.45)
@@ -1497,6 +1500,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             gags = (body["gags"] as? [String]) ?? []
             publishClips()
             js("desk.setLook('\(look)')")
+            calmGaze = calm; js("desk.setCalm(\(calmGaze))")
             queued.forEach(js); queued.removeAll()
         }
     }
@@ -1561,6 +1565,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Meetings", meetingItems()))
         m.addItem(sub("Focus Timer", focusItems()))
         m.addItem(sub("Just for Fun", funItems()))
+        m.addItem(sub("Liveliness", livelinessItems()))
         m.addItem(sub("Stretch Breaks", moveItems()))
         m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(sub("Site Checks", siteItems()))
@@ -2124,6 +2129,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
             "Count Down to Meetings (colour change): \(on(meetingCountdown))",
+            "Liveliness: \(calm ? "Calm" : "Lively")",
             "Mac Housekeeping: \(on(housekeeping))",
             "Just for Fun: Jam Along to Music \(on(jamAlong)), Friday at 5 Celebration \(on(celebrations)), Birthdays from Contacts \(on(birthdays))",
             "Focus Timer: sessions of \(focusMinutes) minutes\(focusing ? ", one going now" : ""); \(focusToday().0) finished today",
@@ -2785,8 +2791,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             }
         }
     }
+    var jamWork: DispatchWorkItem?
     func jam() {
-        if musicPlaying && jamAlong && !focusing { js("desk.hold('boombox', 600000)") } else { js("desk.unhold('boombox')") }
+        let on = musicPlaying && jamAlong && !focusing
+        jamWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.js(on ? "desk.hold('boombox', 600000)" : "desk.unhold('boombox')") }
+        jamWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + (calmGaze ? 4 : 0), execute: w)    // Calm: skipping a track doesn't flicker it
     }
     @objc func toggleJamAlong() {
         jamAlong.toggle(); jam()
@@ -2861,6 +2872,35 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     @objc func toggleCelebrations() {
         celebrations.toggle()
         say(celebrations ? "Friday at 5, we celebrate." : "No Friday celebrations. Very professional.")
+    }
+
+    // MARK: liveliness
+
+    /// Calm (the default) or Lively, in config.json "liveliness" so the bridge reads it too. Calm: he holds each
+    /// mood at least 10 seconds, celebrates the end of a real stretch of work instead of every turn, does an idle
+    /// bit every few minutes instead of every minute, plays event clips at most every 10 minutes, glances where
+    /// your pointer stops instead of tracking it, and lets the boombox settle before it comes or goes.
+    var calm: Bool {
+        get {
+            let c = (try? JSONSerialization.jsonObject(with: Data(contentsOf: Setup.runtime.appendingPathComponent("config.json")))) as? [String: Any]
+            return (c?["liveliness"] as? String ?? "calm") != "lively"
+        }
+        set {
+            let url = Setup.runtime.appendingPathComponent("config.json")
+            var c = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any]) ?? [:]
+            c["liveliness"] = newValue ? "calm" : "lively"
+            if let d = try? JSONSerialization.data(withJSONObject: c, options: [.prettyPrinted]) { try? d.write(to: url) }
+            calmGaze = newValue; js("desk.setCalm(\(newValue))")
+        }
+    }
+    func livelinessItems() -> [NSMenuItem] {
+        [item("Calm", #selector(pickLiveliness(_:)), on: calm, rep: "calm"),
+         item("Lively", #selector(pickLiveliness(_:)), on: !calm, rep: "lively")]
+    }
+    @objc func pickLiveliness(_ s: NSMenuItem) {
+        guard let v = s.representedObject as? String else { return }
+        calm = v == "calm"
+        say(calm ? "Calm it is: fewer switches, longer moods, one celebration per job." : "Lively it is. I contain multitudes.")
     }
 
     // MARK: screen sharing

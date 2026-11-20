@@ -98,7 +98,22 @@
     else if (L.SWAPS && L.SWAPS[want.key]) startSeq({ kind: 'swap', key: want.key, from: curMood, to: curMood });
     else startSeq(want);
   }
-  function setTarget(m) { target = m; if (cur.kind === 'loop') settle(curMood); }
+  // Calm (the app's default; desk.setCalm(false) for Lively): once he's up to something (typing, celebrating...) he
+  // keeps at it at least DWELL_MS, so a flurry of quick changes (Claude starting and stopping) plays as one. Getting
+  // going from rest is immediate, and anything that needs you goes straight through.
+  let calm = true, targetAt = 0, queued = null, queueTimer = 0;
+  const DWELL_MS = 10000, URGENT = new Set(['alert', 'waiting', 'meeting', 'letter', 'flag']), REST = new Set(['idle', 'awake', 'night']);
+  function setTarget(m) {
+    const since = millis() - targetAt;
+    if (calm && m !== target && !URGENT.has(m) && !REST.has(target) && since < DWELL_MS) {
+      queued = m; clearTimeout(queueTimer);
+      queueTimer = setTimeout(() => { const q = queued; queued = null; if (q && q !== target) setTarget(q); }, DWELL_MS - since + 20);
+      return;
+    }
+    queued = null; clearTimeout(queueTimer);
+    if (m !== target) targetAt = millis();
+    target = m; if (cur.kind === 'loop') settle(curMood);
+  }
   // You at the Mac (the app says so: desk.present): no deep night sleep while you're using it, he's just idle.
   // asked: what the bridge (or his own offline mode) wants; shown: what he actually plays.
   let present = false, asked = 'idle', wakeUntil = 0;
@@ -106,7 +121,11 @@
   let holdMood = null, holdUntil = 0;              // the app showing something for a while (an email alert: the letter)
   const shown = m => ((m === 'idle' || m === 'night' || m === 'awake') && holdMood && millis() < holdUntil ? holdMood
     : (m === 'idle' || m === 'night') && millis() < wakeUntil ? 'awake' : m === 'night' && present ? 'idle' : m);
-  function want(m) { asked = m; if (shown(m) !== target) setTarget(shown(m)); }
+  function want(m) {
+    asked = m;
+    const s = shown(m);
+    if (s === target) { queued = null; clearTimeout(queueTimer); } else setTarget(s);     // back where he is: drop a queued change
+  }
   function setPresent(on) { present = !!on; if (asked === 'night') want('night'); }
 
   const GAGS = L.GAGS || [];
@@ -148,7 +167,7 @@
   function autoBehaviour(now) {
     if (demo || cur.kind !== 'loop' || target !== curMood) return;
     if (curMood === 'idle' && !pendingEvent && !hostAlive(now)) {
-      if (!nextFidget) nextFidget = now + 40000 + Math.random() * 50000;
+      if (!nextFidget) nextFidget = now + (calm ? 240000 + Math.random() * 120000 : 40000 + Math.random() * 50000);
       if (now > nextFidget) { nextFidget = 0; playEvent(['fidget_toss', 'fidget_twitch', 'fidget_bubble'][Math.floor(Math.random() * 3)]); }
     } else nextFidget = 0;
     if (curMood === 'alert' && now - loopSince > ESCALATE_MS) setTarget('waiting');
@@ -397,6 +416,7 @@
   window.desk = {
     line, tap, wake, watch, follow, hold, setLook, said, hit, act: setAct, present: setPresent,
     play: n => playEvent(String(n)),
+    setCalm: on => { calm = !!on; if (!calm) { queued = null; clearTimeout(queueTimer); } },
     unhold: m => { if (holdMood === m) { holdUntil = 0; want(asked); } },   // end a hold, if it's still that one (music stopped)          // one of his clips by name (stretch: the version for whatever mood he's in)
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
     state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, act, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
