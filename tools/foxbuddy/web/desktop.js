@@ -288,6 +288,30 @@
     return gazeAmt > 0.01 ? [gazeDir[0], gazeDir[1], gazeAmt] : null;
   }
 
+  // ---------- little extras over him (a lantern, a paint chip, a sign, a parcel, a flash) ----------
+  // desk.extra(kind, value, ms): show one for ms (0 = until changed; value null/false removes it).
+  const extras = {};
+  function setExtra(kind, value, ms) {
+    if (value === null || value === false || value === undefined) { delete extras[kind]; return; }
+    extras[kind] = { value, from: millis(), until: ms > 0 ? millis() + ms : Infinity };
+  }
+  function extrasNow(now) {
+    const out = {};
+    for (const [k, e] of Object.entries(extras)) {
+      if (now > e.until) { delete extras[k]; continue; }
+      const age = (now - e.from) / 1000;
+      if (k === 'parcel') out.parcel = Math.min(1, age / 1.6);
+      else if (k === 'flash') out.flash = Math.max(0, 1 - age / 0.5);
+      else { out[k] = e.value; if (k === 'swatch') out.swatchAge = age; }
+    }
+    return out;
+  }
+  function extrasKey(now) {
+    const ks = Object.keys(extras); if (!ks.length) return '';
+    const moving = ks.some(k => k === 'parcel' || k === 'flash' || (k === 'swatch' && now - extras[k].from < 400));
+    return ks.map(k => k + ':' + extras[k].value).join(',') + (moving ? '|' + Math.floor(now / 33) : '');
+  }
+
   // ---------- drawing ----------
   let look = 'float';                 // float: no background, light line, a dark halo so he reads on any wallpaper
                                       // ink: no background, dark line (like a cartoon on paper)
@@ -376,7 +400,8 @@
     canvas.style.opacity = dimNow.toFixed(3);
     const ov = offlineMark(now) || ovWorking || ovWaiting || ovUnseen;
     const g = gazeNow(now);
-    const key = `${cur.key}|${tick}|${hex(tintNow)}|${look}|${ov ? Math.floor(now / 100) : ''}|${g ? g.map(v => v.toFixed(2)).join(',') : ''}`;
+    const xk = extrasKey(now);
+    const key = `${cur.key}|${xk}|${tick}|${hex(tintNow)}|${look}|${ov ? Math.floor(now / 100) : ''}|${g ? g.map(v => v.toFixed(2)).join(',') : ''}`;
     if (key === lastKey) return;
     lastKey = key;
     L.setTint(hex(tintNow)); L.setLine(look === 'ink' ? 'paper' : 'glow');
@@ -385,8 +410,9 @@
     raw.save();
     if (look === 'glass') { raw.beginPath(); raw.roundRect(0, 0, canvas.width, canvas.height, canvas.width * 0.09); raw.clip(); }
     try {
-      if (cur.kind === 'loop') L.render(ctx, cur.from, id, tick, { dim: false, gaze: g });
-      else L.render(ctx, L.fxFor(id), id, tick, { dim: false });
+      const extras = extrasNow(now);
+      if (cur.kind === 'loop') L.render(ctx, cur.from, id, tick, { dim: false, gaze: g, extras });
+      else L.render(ctx, L.fxFor(id), id, tick, { dim: false, extras });
     } catch (e) { console.error('render', cur.key, id, e); }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (ov) drawOverlay(now);
@@ -417,6 +443,7 @@
   window.desk = {
     line, tap, wake, watch, follow, hold, setLook, said, hit, act: setAct, present: setPresent,
     play: n => playEvent(String(n)),
+    extra: (kind, value, ms) => setExtra(String(kind), value, +ms || 0),
     face: d => { facing = d < 0 ? -1 : 1; canvas.style.transform = facing < 0 ? 'translateX(-50%) scaleX(-1)' : ''; },   // which way he's walking (keeps start.js's centring)
     setCalm: on => { calm = !!on; if (!calm) { queued = null; clearTimeout(queueTimer); } },
     unhold: m => { if (holdMood === m) { holdUntil = 0; want(asked); } },   // end a hold, if it's still that one (music stopped)          // one of his clips by name (stretch: the version for whatever mood he's in)

@@ -310,6 +310,15 @@
     [3, { eyes: 'happy', mouth: 'smile', squash: 0.06, hx: -2, earL: -0.1, earR: 0.1 }], [3, { eyes: 'happy', mouth: 'smile', squash: 0.04, hx: 2, earL: 0.1, earR: -0.1 }],
     [3, { eyes: 'happy', mouth: 'smile', squash: 0.05, hx: -2 }], [12, { eyes: 'happy', mouth: 'open', blush: true, tail: 0.3 }]];
   for (const m of MOMENTS) if (m !== 'night') event(`stretch_${m}`, m, beat(STRETCH));
+  // pounce: you wiggled the pointer near him. Crouch, wiggle, leap (the app faces him toward it), land pleased.
+  const POUNCE = [[4, { eyes: 'wide', mouth: 'flat', squash: 0.16, y: 5, hy: 4, perk: 1.1, armL: [104, 168], armR: [150, 168], tail: 0.5 }],
+    [2, { eyes: 'wide', mouth: 'flat', squash: 0.18, y: 6, hx: -3, hy: 4, perk: 1.12, armL: [104, 170], armR: [150, 170], tail: 0.7, lean: -0.05 }],
+    [2, { eyes: 'wide', mouth: 'flat', squash: 0.18, y: 6, hx: 3, hy: 4, perk: 1.12, armL: [104, 170], armR: [150, 170], tail: 0.3, lean: 0.05 }],
+    [2, { eyes: 'wide', mouth: 'flat', squash: 0.18, y: 6, hx: -3, hy: 4, perk: 1.12, armL: [104, 170], armR: [150, 170], tail: 0.7, lean: -0.05 }],
+    [3, { eyes: 'dot', look: [3, -1], mouth: 'open', squash: -0.14, y: -22, x: 14, lean: 0.32, armL: [176, 104], armR: [196, 112], tail: 0.1, earL: -0.25, earR: -0.25 }],
+    [3, { eyes: 'happy', mouth: 'grin', squash: 0.14, y: 2, x: 24, lean: 0.12, armL: [168, 172], armR: [192, 172], tail: 0.4 }],
+    [10, { eyes: 'happy', mouth: 'smile', blush: true, x: 10, tail: 0.3 }]];
+  for (const m of MOMENTS) if (m !== 'night') event(`pounce_${m}`, m, beat(POUNCE));
   // at night only a soft startle: one eye opens, he grumbles, back to sleep
   const N = firstPose.night;
   CLIPS.tap_startle_night = { home: 'night', seq: seq('startle', smoothFrom(N, beat([[3, { squash: 0.06, earL: 0.1, earR: 0.1 }], [8, { eyes: 'squint', earR: 0, mouth: 'flat' }], [10, { eyes: 'squint', mouth: 'wobble', brows: 'cross' }], [6, { eyes: 'closed', mouth: 'flat' }], [10, {}]], N))) };
@@ -602,6 +611,45 @@
     }
   }
 
+  // ---------- little extras the app shows for a moment, over whatever he's doing (opts.extras) ----------
+  // lantern: true (dark mode at night: a glowing lantern on the floor beside him); swatch: '#rrggbb' (a paint chip
+  // of a colour you copied); sign: 'text' (a placard on a stick: a countdown); parcel: 0..1 (a download dropping
+  // in, then sitting by his feet); flash: 0..1 (a camera flash fading: a screenshot).
+  function drawAccessories(c, X, tick, seed) {
+    const t = tick / 24;
+    if (X.lantern) {
+      const x = 28, y = 196, glow = 0.55 + Math.sin(t * 3.1) * 0.08;
+      const g = c.createRadialGradient(x, y - 22, 4, x, y - 22, 46);
+      g.addColorStop(0, `rgba(255,214,120,${glow})`); g.addColorStop(1, 'rgba(255,214,120,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(x, y - 22, 46, 0, Math.PI * 2); c.fill();
+      stroke(c, [[x - 9, y - 38], [x, y - 48], [x + 9, y - 38]], seed + 1001, 2.6);                         // handle
+      part(c, [[x - 12, y - 36], [x + 12, y - 36], [x + 14, y - 30], [x + 14, y - 6], [x + 12, y], [x - 12, y], [x - 14, y - 6], [x - 14, y - 30]], 'rgba(255,224,150,.92)', seed + 1002, { width: 3 });
+      part(c, oval(x, y - 18, 4.5, 7 + Math.sin(t * 7) * 1.2, 10), '#FF9F2E', seed + 1003, { line: false });   // the flame
+      stroke(c, [[x - 14, y - 32], [x + 14, y - 32]], seed + 1004, 2.4); stroke(c, [[x - 14, y - 5], [x + 14, y - 5]], seed + 1005, 2.4);
+    }
+    if (X.swatch) {
+      const pop = Math.min(1, (X.swatchAge || 1) * 4), x = 204, y = 92 - (1 - pop) * 20;
+      c.save(); c.translate(x, y); c.rotate(0.12); c.globalAlpha = pop;
+      part(c, [[-20, -34, 1], [20, -34, 1], [20, 30, 1], [-20, 30, 1]], CREAM, seed + 1010, { width: 3, wobble: 0.2 });
+      part(c, [[-15, -29, 1], [15, -29, 1], [15, 12, 1], [-15, 12, 1]], X.swatch, seed + 1011, { width: 2, wobble: 0.1 });
+      text(c, X.swatch.toUpperCase(), 0, 24, 8.5, 0, INK);
+      c.restore();
+    }
+    if (X.sign) {
+      const w = Math.max(64, Math.min(92, X.sign.length * 6.6 + 18)), x = Math.max(w / 2 + 4, 52), top = 138;
+      stroke(c, [[x, top + 30], [x + 1, 200]], seed + 1020, 4, '#8B5A3C');                                  // the stick
+      part(c, [[x - w / 2, top, 1], [x + w / 2, top, 1], [x + w / 2, top + 32, 1], [x - w / 2, top + 32, 1]], '#FFD23F', seed + 1021, { width: 3, wobble: 0.2 });
+      text(c, X.sign, x, top + 21, 11.5, -0.03, INK);
+    }
+    if (X.parcel !== undefined) {
+      const u = Math.min(1, X.parcel), fall = u < 0.35 ? u / 0.35 : 1, x = 70, y = -30 + fall * 206 - (u >= 0.35 && u < 0.5 ? Math.sin((u - 0.35) / 0.15 * Math.PI) * 10 : 0);
+      part(c, [[x - 18, y - 30, 1], [x + 18, y - 30, 1], [x + 18, y, 1], [x - 18, y, 1]], '#C89B6D', seed + 1030, { width: 3, wobble: 0.2 });
+      stroke(c, [[x, y - 30], [x, y]], seed + 1031, 2.4, '#8B5A3C'); stroke(c, [[x - 18, y - 22], [x + 18, y - 22]], seed + 1032, 2, '#8B5A3C');
+      if (fall >= 1) { stroke(c, [[x - 5, y - 40], [x, y - 46], [x + 5, y - 40]], seed + 1033, 2, CREAM); }             // a little ta-da
+    }
+    if (X.flash) { c.save(); c.globalAlpha = Math.max(0, X.flash) * 0.85; c.fillStyle = '#fff'; c.beginPath(); c.arc(128, 128, 120, 0, Math.PI * 2); c.fill(); c.restore(); }
+  }
+
   // ---------- drawing a frame ----------
   // opts.gaze = [x, y, amount]: he looks that way (x, y about -1..1; up is negative), amount 0..1 easing in.
   // His eyes go there, his head lifts or turns a little, his ears perk; a blink still blinks.
@@ -629,6 +677,7 @@
     R.draw(c, Object.assign({}, P, { front: (cc, a, s, t) => drawExtras(cc, P, a, s, t) }), seed, tick);
     if (P.prop === 'moon') PROPS.moon(c, P, null, seed);
     if (!opts.noFX) drawFX(c, P.fx || 'none', P, tick, seed);
+    if (opts.extras) drawAccessories(c, opts.extras, tick, seed);
   }
 
   const fxFor = id => (D[id] && D[id].fx) || 'none';

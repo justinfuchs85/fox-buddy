@@ -1228,6 +1228,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             self?.checkBrief(); self?.checkForUpdate(); self?.checkEmailAlerts()
             self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips(); self?.checkSites(); self?.checkHousekeeping(); self?.checkFocus()
             self?.checkFriday(); self?.checkBirthdays(); self?.jam(); self?.checkWander()
+            self?.checkCountdowns(); self?.checkLantern()
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
@@ -1236,6 +1237,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         RunLoop.main.add(sharing, forMode: .common)
         let perch = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkPerch() }
         RunLoop.main.add(perch, forMode: .common)
+        let touches = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.checkFiles(); self?.checkClipboard(); self?.checkWelcome() }
+        RunLoop.main.add(touches, forMode: .common)
         RunLoop.main.add(presence, forMode: .common)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.checkPresence() }
         // Which connectors Claude Code has: shortly after launch, then every 6 hours.
@@ -1352,7 +1355,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             self.makeBubble()
             if self.hotKeyID != "off" { self.setUpHotKey() }
             self.setUpCaptureKey()
-            self.listenForMusic()
+            self.listenForMusic(); self.listenForLock()
         }
         clampOnScreen()
         panel.orderFrontRegardless()
@@ -1471,7 +1474,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         guard let panel = panel, panel.isVisible, ready else { return }
         if grab.dragging { panel.ignoresMouseEvents = false; restingOnHim(false); return }
         let p = NSEvent.mouseLocation, f = panel.frame
-        followPointer(p, f)
+        followPointer(p, f); checkPounce(p, f)
         guard f.contains(p) else { if !panel.ignoresMouseEvents { panel.ignoresMouseEvents = true }; restingOnHim(false); return }
         let x = p.x - f.minX, y = f.maxY - p.y
         web.evaluateJavaScript("desk.hit(\(x), \(y))") { [weak self] r, _ in
@@ -1506,7 +1509,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             gags = (body["gags"] as? [String]) ?? []
             publishClips()
             js("desk.setLook('\(look)')")
-            calmGaze = calm; js("desk.setCalm(\(calmGaze))")
+            calmGaze = calm; js("desk.setCalm(\(calmGaze))"); checkLantern()
             queued.forEach(js); queued.removeAll()
         }
     }
@@ -1571,6 +1574,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Meetings", meetingItems()))
         m.addItem(sub("Focus Timer", focusItems()))
         m.addItem(sub("Just for Fun", funItems()))
+        m.addItem(sub("Little Touches", touchItems()))
+        m.addItem(sub("Countdowns", countdownItems()))
         m.addItem(sub("Liveliness", livelinessItems()))
         m.addItem(sub("Wander Around", [item("Wander Around Now and Then", #selector(toggleWander), on: wanderOn),
                                         item("Go Sit on My Window", #selector(wanderNow))]))
@@ -2137,6 +2142,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
             "Count Down to Meetings (colour change): \(on(meetingCountdown))",
+            "Little Touches: " + [("downloads", "Catch My Downloads"), ("screenshots", "Screenshot Helper"), ("welcome", "Welcome Me Back"), ("clipboard", "React to What I Copy"), ("pounce", "Pounce at My Pointer"), ("lantern", "Lantern in Dark Mode")].map { "\($0.1) \(on(touch($0.0)))" }.joined(separator: ", "),
+            "Countdowns: \(countdowns.isEmpty ? "none" : countdowns.map { "\($0[0]) on \($0[1])" }.joined(separator: ", "))",
             "Liveliness: \(calm ? "Calm" : "Lively"); Wander Around: \(on(wanderOn))",
             "Mac Housekeeping: \(on(housekeeping))",
             "Just for Fun: Jam Along to Music \(on(jamAlong)), Friday at 5 Celebration \(on(celebrations)), Birthdays from Contacts \(on(birthdays))",
@@ -3030,6 +3037,239 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         say(wanderOn ? "Every so often I'll hop over and sit on the window you're in. Drag me anywhere to change where home is." : "I'll stay in my corner.")
     }
 
+    // MARK: little touches (downloads, screenshots, welcome back, clipboard, countdowns, pounce, lantern)
+
+    func touch(_ key: String) -> Bool { prefs.object(forKey: "touch." + key) as? Bool ?? true }
+    @objc func toggleTouch(_ s: NSMenuItem) {
+        guard let k = s.representedObject as? String else { return }
+        prefs.set(!touch(k), forKey: "touch." + k)
+        if k == "lantern" { checkLantern() }
+        say(touch(k) ? "On." : "Off.")
+    }
+    func touchItems() -> [NSMenuItem] {
+        [("downloads", "Catch My Downloads"), ("screenshots", "Screenshot Helper"), ("welcome", "Welcome Me Back"),
+         ("clipboard", "React to What I Copy"), ("pounce", "Pounce at My Pointer"), ("lantern", "Lantern in Dark Mode")]
+            .map { item($0.1, #selector(toggleTouch(_:)), on: touch($0.0), rep: $0.0) }
+    }
+
+    /// Downloads and screenshots: every 2 seconds, what's new in ~/Downloads and wherever screenshots go.
+    var knownFiles: [String: Set<String>] = [:], pendingFiles: [String: Int64] = [:]
+    static var screenshotFolder: URL {
+        let fm = FileManager.default
+        if let loc = UserDefaults(suiteName: "com.apple.screencapture")?.string(forKey: "location") {
+            let u = URL(fileURLWithPath: (loc as NSString).expandingTildeInPath)
+            var d: ObjCBool = false
+            if fm.fileExists(atPath: u.path, isDirectory: &d), d.boolValue { return u }
+        }
+        return fm.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+    }
+    static let downloadsFolder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+    static let PARTIAL = [".crdownload", ".download", ".part", ".partial", ".tmp", ".opdownload"]
+
+    func checkFiles() {
+        guard ready else { return }
+        if touch("downloads") { scan(App.downloadsFolder, kind: "downloads") }
+        if touch("screenshots") { scan(App.screenshotFolder, kind: "screenshots") }
+    }
+    func scan(_ folder: URL, kind: String) {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: folder.path) else { return }
+        let now = Set(names.filter { !$0.hasPrefix(".") })
+        guard let before = knownFiles[kind] else { knownFiles[kind] = now; return }      // first look: just learn what's there
+        var fresh: [String] = []
+        for n in now.subtracting(before) {
+            let lower = n.lowercased()
+            if App.PARTIAL.contains(where: { lower.hasSuffix($0) }) { continue }        // still downloading
+            if kind == "screenshots" && !(n.hasPrefix("Screenshot") || n.hasPrefix("Screen Shot") || n.hasPrefix("Screen Recording")) { continue }
+            let path = folder.appendingPathComponent(n).path
+            let size = ((try? fm.attributesOfItem(atPath: path))?[.size] as? Int64) ?? -1
+            if pendingFiles[path] != size { pendingFiles[path] = size; continue }        // wait until it stops growing
+            pendingFiles[path] = nil
+            fresh.append(n)
+        }
+        knownFiles[kind] = before.union(fresh).intersection(now)
+        guard !fresh.isEmpty, !hiddenByUser else { return }
+        if kind == "downloads" {
+            js("desk.extra('parcel', 1, 7000)")
+            let first = fresh.sorted()[0], path = folder.appendingPathComponent(first).path
+            bubbleJump = ["reveal": path]; bubbleKind = "info"; bubbleMode = "say"
+            let text = fresh.count == 1 ? "**\(first.prefix(60))** landed in Downloads." : "\(fresh.count) files landed in Downloads."
+            bubbleJS("bubble.show(\(jsonLiteral(["text": text, "kind": "info", "jump": true, "jumpLabel": "Show in Finder"] as [String: Any])))")
+            showBubble(key: false)
+        } else {
+            js("desk.extra('flash', 1, 600)")
+            let first = fresh.sorted()[0], path = folder.appendingPathComponent(first).path
+            let tidy = App.screenshotFolder.lastPathComponent == "Desktop"
+            bubbleJump = tidy ? ["fileShots": fresh.map { folder.appendingPathComponent($0).path }] : ["reveal": path]
+            bubbleKind = "info"; bubbleMode = "say"
+            bubbleJS("bubble.show(\(jsonLiteral(["text": fresh.count == 1 ? "Screenshot saved." : "\(fresh.count) screenshots saved.", "kind": "info", "jump": true, "jumpLabel": tidy ? "Move to Pictures › Screenshots" : "Show in Finder"] as [String: Any])))")
+            showBubble(key: false)
+        }
+    }
+    /// The screenshot button: off the Desktop into ~/Pictures/Screenshots (a name that's taken gets a number).
+    func fileScreenshots(_ paths: [String]) {
+        let fm = FileManager.default, dest = fm.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/Screenshots")
+        try? fm.createDirectory(at: dest, withIntermediateDirectories: true)
+        var moved: [URL] = []
+        for p in paths where fm.fileExists(atPath: p) {
+            let src = URL(fileURLWithPath: p)
+            var to = dest.appendingPathComponent(src.lastPathComponent), n = 2
+            while fm.fileExists(atPath: to.path) { to = dest.appendingPathComponent("\(src.deletingPathExtension().lastPathComponent) \(n).\(src.pathExtension)"); n += 1 }
+            if (try? fm.moveItem(at: src, to: to)) != nil { moved.append(to) }
+        }
+        if moved.isEmpty { say("I couldn't move it. Is it still on the Desktop?") }
+        else { NSWorkspace.shared.activateFileViewerSelecting(moved); say("Filed in Pictures › Screenshots.") }
+    }
+
+    /// Welcome back: you were away 15 minutes or more (no keyboard or mouse, or the screen locked) and now you're back.
+    var awaySince = 0.0, lockedAt = 0.0
+    func checkWelcome() {
+        let now = Date().timeIntervalSince1970, idle = App.idleSeconds()
+        if idle >= 15 * 60 { if awaySince == 0 { awaySince = now - idle }; return }
+        guard awaySince > 0, idle < 30 else { return }
+        let gone = now - awaySince
+        awaySince = 0
+        welcome(gone)
+    }
+    func welcome(_ gone: Double) {
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard touch("welcome"), ready, !hiddenByUser, !hiddenForShare, gone >= 15 * 60, hour >= 7, hour < 23 else { return }
+        let mins = Int(gone / 60), time = mins < 90 ? "\(mins) minutes" : String(format: "%.1f hours", gone / 3600)
+        js("desk.wake()")
+        var line = ["Welcome back. You were gone \(time).", "Back after \(time). I held down the fort.", "There you are. \(time.capitalized(with: nil)) away."].randomElement()!
+        if heldBubble { line += " Something came in while you were gone." }
+        say(line)
+    }
+    func listenForLock() {
+        let dn = DistributedNotificationCenter.default()
+        dn.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            self?.lockedAt = Date().timeIntervalSince1970
+        }
+        dn.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            guard let self = self, self.lockedAt > 0 else { return }
+            let gone = Date().timeIntervalSince1970 - self.lockedAt
+            self.lockedAt = 0; self.awaySince = 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.welcome(gone) }
+        }
+    }
+
+    /// What you copy: a colour (#3D8BFF, rgb(61, 139, 255)) and he holds up a paint chip of it; a phone number and
+    /// he offers to call it. Only short plain text, and never anything a password manager marks as concealed.
+    var pasteCount = NSPasteboard.general.changeCount
+    func checkClipboard() {
+        let pb = NSPasteboard.general
+        guard pb.changeCount != pasteCount else { return }
+        pasteCount = pb.changeCount
+        guard touch("clipboard"), ready, !hiddenByUser, !hiddenForShare else { return }
+        let types = (pb.types ?? []).map(\.rawValue)
+        if types.contains("org.nspasteboard.ConcealedType") || types.contains("org.nspasteboard.TransientType") { return }
+        guard let s = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty, s.count <= 40 else { return }
+        if let hex = App.colourHex(s) { js("desk.extra('swatch', '\(hex)', 8000)"); return }
+        if let d = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.phoneNumber.rawValue),
+           let m = d.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)), m.range.length == (s as NSString).length,
+           let number = m.phoneNumber {
+            let digits = number.filter { $0.isNumber || $0 == "+" }
+            guard digits.filter(\.isNumber).count >= 7, !keepingQuiet else { return }
+            bubbleJump = ["tel": digits]; bubbleKind = "info"; bubbleMode = "say"
+            bubbleJS("bubble.show(\(jsonLiteral(["text": "Call \(number)?", "kind": "info", "jump": true, "jumpLabel": "Call"] as [String: Any])))")
+            showBubble(key: false)
+        }
+    }
+    static func colourHex(_ s: String) -> String? {
+        let t = s.lowercased()
+        if t.range(of: #"^#[0-9a-f]{6}$"#, options: .regularExpression) != nil { return t }
+        if t.range(of: #"^#[0-9a-f]{3}$"#, options: .regularExpression) != nil { return "#" + t.dropFirst().map { "\($0)\($0)" }.joined() }
+        if let r = t.range(of: #"^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})"#, options: .regularExpression) {
+            let n = t[r].split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+            if n.count >= 3, n.prefix(3).allSatisfy({ $0 <= 255 }) { return "#" + n.prefix(3).map { String(format: "%02x", $0) }.joined() }
+        }
+        return nil
+    }
+
+    /// Countdowns: name + date, in UserDefaults "countdowns" [["name", "yyyy-MM-dd"]]. Once a day (the first time
+    /// you're at the Mac after 8 AM) he holds up a sign for the nearest one within 60 days; on the day, a party.
+    static let dayF: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f }()
+    var countdowns: [[String]] {
+        get { (prefs.array(forKey: "countdowns") as? [[String]]) ?? [] }
+        set { prefs.set(newValue, forKey: "countdowns") }
+    }
+    func daysUntil(_ day: String) -> Int? {
+        guard let d = App.dayF.date(from: day) else { return nil }
+        return Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: d).day
+    }
+    func checkCountdowns(force: Bool = false) {
+        let today = App.dayF.string(from: Date())
+        guard ready, !hiddenByUser, !keepingQuiet, App.idleSeconds() < 120 else { return }
+        guard force || (Calendar.current.component(.hour, from: Date()) >= 8 && prefs.string(forKey: "lastCountdown") != today) else { return }
+        countdowns = countdowns.filter { (daysUntil($0[1]) ?? -1) >= 0 }
+        let soon = countdowns.compactMap { c -> (String, Int)? in daysUntil(c[1]).map { (c[0], $0) } }.filter { $0.1 <= 60 || force }.sorted { $0.1 < $1.1 }
+        guard let (name, days) = soon.first else { if force { say("No countdowns yet. Add one under Countdowns in my menu.") }; return }
+        prefs.set(today, forKey: "lastCountdown")
+        if days == 0 {
+            js("desk.hold('done', 15000)"); js("desk.extra('sign', \(jsonLiteral("\(name.prefix(14)): today!")), 15000)")
+            say("It's \(name) day!")
+        } else {
+            js("desk.extra('sign', \(jsonLiteral("\(name.prefix(12)): \(days) day\(days == 1 ? "" : "s")")), 12000)")
+            say(days == 1 ? "\(name) is tomorrow." : "\(days) days until \(name).")
+        }
+    }
+    func countdownItems() -> [NSMenuItem] {
+        var items = [item("Add a Countdown…", #selector(addCountdown)), item("Show My Countdown", #selector(showCountdown))]
+        if !countdowns.isEmpty { items.append(.separator()) }
+        items += countdowns.map { c in
+            let d = daysUntil(c[1]) ?? 0
+            return item("Remove \(c[0]) (\(d == 0 ? "today" : "\(d) day\(d == 1 ? "" : "s")"))", #selector(removeCountdown(_:)), rep: c[0])
+        }
+        return items
+    }
+    @objc func showCountdown() { checkCountdowns(force: true) }
+    @objc func addCountdown() {
+        let a = NSAlert()
+        a.messageText = "What are we counting down to?"
+        a.informativeText = "A short name (it goes on his sign) and the day."
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 58))
+        let name = NSTextField(frame: NSRect(x: 0, y: 32, width: 300, height: 24)); name.placeholderString = "Vacation"
+        let date = NSDatePicker(frame: NSRect(x: 0, y: 0, width: 160, height: 24))
+        date.datePickerElements = .yearMonthDay; date.datePickerStyle = .textFieldAndStepper
+        date.minDate = Calendar.current.startOfDay(for: Date()); date.dateValue = Date().addingTimeInterval(7 * 86400)
+        box.addSubview(name); box.addSubview(date)
+        a.accessoryView = box; a.addButton(withTitle: "Add"); a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true); a.window.initialFirstResponder = name
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let n = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        countdowns = countdowns.filter { $0[0] != n } + [[String(n.prefix(40)), App.dayF.string(from: date.dateValue)]]
+        checkCountdowns(force: true)
+    }
+    @objc func removeCountdown(_ s: NSMenuItem) {
+        guard let n = s.representedObject as? String else { return }
+        countdowns = countdowns.filter { $0[0] != n }; say("Removed \(n).")
+    }
+
+    /// Pounce: wiggle the pointer back and forth right next to him and he crouches, wiggles and pounces at it.
+    var wiggle: [(t: Double, dir: Int)] = [], lastWiggleX: CGFloat = 0, lastPounce = 0.0
+    func checkPounce(_ p: NSPoint, _ f: NSRect) {
+        guard touch("pounce"), ready, !wandering, !(bubble?.isVisible ?? false), f.insetBy(dx: -f.width * 0.8, dy: -f.height * 0.3).contains(p) else { wiggle = []; return }
+        let now = Date().timeIntervalSince1970, dx = p.x - lastWiggleX
+        lastWiggleX = p.x
+        guard abs(dx) > 5 else { return }
+        let dir = dx > 0 ? 1 : -1
+        if wiggle.last?.dir != dir { wiggle.append((now, dir)) }
+        wiggle = wiggle.filter { now - $0.t < 1.6 }
+        guard wiggle.count >= 5, now - lastPounce > 20 else { return }
+        wiggle = []; lastPounce = now
+        let toward = p.x < f.midX ? -1 : 1
+        js("desk.face(\(toward))"); js("desk.play('pounce')")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self] in if self?.wandering == false { self?.js("desk.face(1)") } }
+    }
+
+    /// Lantern: when the Mac is in dark mode in the evening (6 PM to 7 AM), a lantern glows on the floor beside him.
+    func checkLantern() {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let hour = Calendar.current.component(.hour, from: Date())
+        js("desk.extra('lantern', \(touch("lantern") && dark && (hour >= 18 || hour < 7)), 0)")
+    }
+
     // MARK: screen sharing
 
     /// While you share your screen (Zoom, Teams, Webex, Slack, FaceTime, or Meet in a browser) or present full
@@ -3875,6 +4115,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             return
         }
         if let m = j["focus"] as? Int { startFocus(minutes: m); return }
+        if let path = j["reveal"] as? String { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]); return }
+        if let paths = j["fileShots"] as? [String] { fileScreenshots(paths); return }
+        if let tel = j["tel"] as? String, tel.allSatisfy({ $0.isNumber || $0 == "+" }), let u = URL(string: "tel:" + tel) { NSWorkspace.shared.open(u); return }
         if j["snoozeMove"] as? Bool == true {
             activeSince = Date().timeIntervalSince1970 - Double(max(0, moveEvery - 30) * 60)
             say("OK, I'll nudge you again in 30 minutes."); return

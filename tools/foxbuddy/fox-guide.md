@@ -358,6 +358,37 @@ once at the end of a real stretch of Claude's work instead of after every turn, 
 glances where the pointer stops instead of following every movement, and lets the boombox settle for a few
 seconds before it appears or goes. Lively is the original, busier pace.
 
+## Little Touches
+
+Right-click › Little Touches. Small things he notices on the Mac by himself, no Claude involved. All on by
+default; each one can be switched off there.
+
+- Catch My Downloads: when a download finishes in ~/Downloads, a little parcel drops in beside him and he
+  says what landed, with a Show in Finder button. Several at once become one message. He waits until the
+  file stops growing, so half-finished downloads don't count. macOS asks once for permission to look in
+  Downloads.
+- Screenshot Helper: when a screenshot or screen recording is saved, the screen around him flashes like a
+  camera. If screenshots go to the Desktop (the macOS default) he offers Move to Pictures › Screenshots;
+  if they go somewhere else, Show in Finder. macOS may ask once for permission to look at the Desktop.
+- Welcome Me Back: after 15 minutes or more away from the Mac (or when the user unlocks it), he wakes up
+  and says how long they were gone, and mentions if something came in meanwhile. Only between 7 AM and
+  11 PM, not while hidden or sharing.
+- React to What I Copy: copy a colour (#3D8BFF, #fff or rgb(61, 139, 255)) and he holds up a paint chip of
+  it for a few seconds. Copy a phone number and he offers to Call it (through iPhone or FaceTime). Only
+  short plain text; anything a password manager marks private is ignored, and nothing is saved or sent.
+- Pounce at My Pointer: wiggle the pointer quickly back and forth right next to him and he crouches,
+  wiggles and pounces at it, like a cat with a laser dot. At most every 20 seconds.
+- Lantern in Dark Mode: when the Mac is in dark mode in the evening (6 PM to 7 AM), a little lantern glows
+  on the floor beside him.
+
+## Countdowns
+
+Right-click › Countdowns › Add a Countdown…: a short name (it goes on his sign) and a day. Once a day, the
+first time the user is at the Mac after 8 AM, he holds up a sign for the nearest countdown within 60 days
+("Vacation: 12 days"). On the day itself he celebrates with a "today!" sign. Show My Countdown shows the
+nearest one now; each countdown also has a Remove item there with its days left. Past ones drop off on
+their own. Kept only on the Mac.
+
 ## Privacy: where things go
 
 - To Anthropic, through Claude Code, under the user's own Claude account: chats, and whatever he looks

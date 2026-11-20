@@ -95,6 +95,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   </dict></array>
   <key>NSAppSleepDisabled</key><true/>
   <key>NSHumanReadableCopyright</key><string>MIT License. Grew out of desk-buddy, by Joe Bentham.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>So he can tell you when a download finishes (Little Touches › Catch My Downloads). He only looks at file names; nothing leaves your Mac.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>So he can spot a new screenshot and offer to file it (Little Touches › Screenshot Helper). He only looks at file names; nothing leaves your Mac.</string>
   <key>NSContactsUsageDescription</key><string>Only if you turn on Birthdays from Contacts: so he can mention a birthday on the day. Nothing leaves your Mac.</string>
   <key>NSAppleEventsUsageDescription</key><string>So he can read your Reminders and Notes, and (only after you approve each one) add a reminder, make a note or run a shortcut.</string>
 $SPARKLE_PLIST
