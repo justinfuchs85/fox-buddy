@@ -566,7 +566,7 @@ enum Calc {
         check("5 lbs in oz", convert("5 lbs in oz")?.shown, "5 lbs = 80 oz")
         check("72 f to c", convert("72°F to C")?.copy, "22.222222")
         check("10 km in miles", convert("10 km in miles")?.copy, "6.213712")
-        check("1 cup in ml", convert("1 cup in ml")?.copy, "236.588")
+        check("1 cup in ml", convert("1 cup in ml")?.copy, "240")
         check("5 lbs in km", convert("5 lbs in km")?.shown, nil)
         check("2h", minutes("2h").map(String.init), "120")
         check("90 min", minutes("90 min").map(String.init), "90")
