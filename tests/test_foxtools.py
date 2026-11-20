@@ -104,6 +104,7 @@ class AboutFoxBuddy(unittest.TestCase):
         menu += swift[swift.index("    func funItems()"):swift.index("    @objc func toggleCelebrations")]
         menu += swift[swift.index("    func livelinessItems()"):swift.index("    @objc func pickLiveliness")]
         menu += swift[swift.index("    func countdownItems()"):swift.index("    @objc func showCountdown")]
+        menu += swift[swift.index("    func awakeItems()"):swift.index("    @objc func pickAwake")]
         titles = set(re.findall(r'(?:item|sub)\("([^"\\]+)"', menu))
         touches = swift[swift.index("    func touchItems()"):swift.index("    /// Downloads and screenshots")]
         titles |= set(re.findall(r'\("\w+", "([^"]+)"\)', touches))

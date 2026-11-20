@@ -13,6 +13,7 @@
 // Build and launch: zsh tools/foxbuddy/build.sh
 
 import Carbon.HIToolbox
+import IOKit.pwr_mgt
 import Cocoa
 import Contacts
 import Network
@@ -360,15 +361,233 @@ final class HotKey {
 }
 
 /// Quick capture's box: one line, Return saves, Escape (or clicking elsewhere) cancels.
+/// The command bar's arithmetic and unit conversions. Pure functions, no AppKit: `FoxBuddy --self-test` checks them.
+enum Calc {
+    enum Tok: Equatable { case num(Double), op(Character), word(String) }
+
+    static func tokens(_ s: String) -> [Tok]? {
+        var out: [Tok] = []
+        let cs = Array(s.lowercased())
+        var i = 0
+        while i < cs.count {
+            let c = cs[i]
+            if c == " " || c == "$" || c == "€" || c == "£" { i += 1; continue }
+            if c.isASCII && (c.isNumber || c == ".") {
+                var j = i, str = ""
+                while j < cs.count, cs[j].isASCII, cs[j].isNumber || cs[j] == "." || (cs[j] == "," && j + 1 < cs.count && cs[j + 1].isASCII && cs[j + 1].isNumber) {
+                    if cs[j] != "," { str.append(cs[j]) }
+                    j += 1
+                }
+                guard let v = Double(str) else { return nil }
+                out.append(.num(v)); i = j; continue
+            }
+            if c.isLetter {
+                var j = i, w = ""
+                while j < cs.count, cs[j].isLetter { w.append(cs[j]); j += 1 }
+                if w == "x" { out.append(.op("*")) }
+                else if ["of", "pi", "sqrt"].contains(w) { out.append(.word(w)) }
+                else { return nil }
+                i = j; continue
+            }
+            switch c {
+            case "+", "-", "*", "/", "^", "(", ")", "%": out.append(.op(c))
+            case "×", "·": out.append(.op("*"))
+            case "÷": out.append(.op("/"))
+            case "−": out.append(.op("-"))
+            default: return nil
+            }
+            i += 1
+        }
+        return out
+    }
+
+    /// expr := term (± term)*, term := power ((*, /, of) power)*, power := unary (^ power)?,
+    /// unary := -unary | primary %?, primary := number | pi | sqrt(expr) | (expr).
+    /// "240 + 10%" adds ten percent of 240; "18% of 240" is 43.2.
+    final class Parser {
+        let t: [Tok]; var i = 0, ops = 0
+        init(_ t: [Tok]) { self.t = t }
+        var peek: Tok? { i < t.count ? t[i] : nil }
+        func eat(_ o: Character) -> Bool { if peek == .op(o) { i += 1; return true }; return false }
+        func expr() -> (Double, Bool)? {
+            guard var (l, lp) = term() else { return nil }
+            while let p = peek, p == .op("+") || p == .op("-") {
+                i += 1; ops += 1
+                guard let (r, rp) = term() else { return nil }
+                let plus = p == .op("+")
+                if rp && !lp { l = plus ? l * (1 + r) : l * (1 - r) } else { l = plus ? l + r : l - r }
+                lp = false
+            }
+            return (l, lp)
+        }
+        func term() -> (Double, Bool)? {
+            guard var (l, lp) = power() else { return nil }
+            while let p = peek, p == .op("*") || p == .op("/") || p == .word("of") {
+                i += 1; ops += 1
+                guard let (r, _) = power() else { return nil }
+                l = p == .op("/") ? l / r : l * r
+                lp = false
+            }
+            return (l, lp)
+        }
+        func power() -> (Double, Bool)? {
+            guard let (b, bp) = unary() else { return nil }
+            if eat("^") { ops += 1; guard let (e, _) = power() else { return nil }; return (pow(b, e), false) }
+            return (b, bp)
+        }
+        func unary() -> (Double, Bool)? {
+            if eat("-") { guard let (v, p) = unary() else { return nil }; return (-v, p) }
+            if eat("+") { return unary() }
+            guard let v = primary() else { return nil }
+            if eat("%") { ops += 1; return (v / 100, true) }
+            return (v, false)
+        }
+        func primary() -> Double? {
+            guard let p = peek else { return nil }
+            i += 1
+            switch p {
+            case .num(let v): return v
+            case .word("pi"): return Double.pi
+            case .word("sqrt"):
+                ops += 1
+                guard eat("("), let (v, _) = expr(), eat(")") else { return nil }
+                return v.squareRoot()
+            case .op("("):
+                guard let (v, _) = expr(), eat(")") else { return nil }
+                return v
+            default: return nil
+            }
+        }
+    }
+
+    /// A sum, or nil if the text isn't one (a plain number, a phone number or a date isn't).
+    static func evaluate(_ raw: String) -> Double? {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        if s.range(of: #"^\(?\d{3}\)?[-. ]?\d{3}[-. ]\d{4}$"#, options: .regularExpression) != nil { return nil }
+        if s.range(of: #"^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$"#, options: .regularExpression) != nil { return nil }
+        guard let t = tokens(s), !t.isEmpty else { return nil }
+        let p = Parser(t)
+        guard let (v, _) = p.expr(), p.i == t.count, p.ops > 0, v.isFinite else { return nil }
+        return v
+    }
+
+    static func format(_ v: Double, grouping: Bool = true) -> String {
+        if v != 0 && (abs(v) >= 1e15 || abs(v) < 1e-9) { return String(format: "%g", v) }
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "en_US"); f.numberStyle = .decimal; f.usesGroupingSeparator = grouping
+        f.maximumFractionDigits = abs(v) >= 1 ? 6 : 10
+        return f.string(from: NSNumber(value: v == 0 ? 0 : v)) ?? String(v)
+    }
+
+    static let units: [(names: [String], kind: String, unit: Dimension)] = [
+        (["mm", "millimeter", "millimeters", "millimetre", "millimetres"], "length", UnitLength.millimeters),
+        (["cm", "centimeter", "centimeters", "centimetre", "centimetres"], "length", UnitLength.centimeters),
+        (["m", "meter", "meters", "metre", "metres"], "length", UnitLength.meters),
+        (["km", "kilometer", "kilometers", "kilometre", "kilometres"], "length", UnitLength.kilometers),
+        (["in", "inch", "inches"], "length", UnitLength.inches),
+        (["ft", "foot", "feet"], "length", UnitLength.feet),
+        (["yd", "yard", "yards"], "length", UnitLength.yards),
+        (["mi", "mile", "miles"], "length", UnitLength.miles),
+        (["mg", "milligram", "milligrams"], "mass", UnitMass.milligrams),
+        (["g", "gram", "grams"], "mass", UnitMass.grams),
+        (["kg", "kilo", "kilos", "kilogram", "kilograms"], "mass", UnitMass.kilograms),
+        (["oz", "ounce", "ounces"], "mass", UnitMass.ounces),
+        (["lb", "lbs", "pound", "pounds"], "mass", UnitMass.pounds),
+        (["st", "stone"], "mass", UnitMass.stones),
+        (["c", "celsius"], "temp", UnitTemperature.celsius),
+        (["f", "fahrenheit"], "temp", UnitTemperature.fahrenheit),
+        (["k", "kelvin"], "temp", UnitTemperature.kelvin),
+        (["ml", "milliliter", "milliliters", "millilitre", "millilitres"], "volume", UnitVolume.milliliters),
+        (["l", "liter", "liters", "litre", "litres"], "volume", UnitVolume.liters),
+        (["tsp", "teaspoon", "teaspoons"], "volume", UnitVolume.teaspoons),
+        (["tbsp", "tablespoon", "tablespoons"], "volume", UnitVolume.tablespoons),
+        (["cup", "cups"], "volume", UnitVolume.cups),
+        (["fl oz", "floz", "fluid ounce", "fluid ounces"], "volume", UnitVolume.fluidOunces),
+        (["pt", "pint", "pints"], "volume", UnitVolume.pints),
+        (["qt", "quart", "quarts"], "volume", UnitVolume.quarts),
+        (["gal", "gallon", "gallons"], "volume", UnitVolume.gallons),
+        (["mph"], "speed", UnitSpeed.milesPerHour),
+        (["kph", "km/h", "kmh"], "speed", UnitSpeed.kilometersPerHour),
+        (["m/s"], "speed", UnitSpeed.metersPerSecond),
+        (["kb", "kilobyte", "kilobytes"], "data", UnitInformationStorage.kilobytes),
+        (["mb", "megabyte", "megabytes"], "data", UnitInformationStorage.megabytes),
+        (["gb", "gigabyte", "gigabytes"], "data", UnitInformationStorage.gigabytes),
+        (["tb", "terabyte", "terabytes"], "data", UnitInformationStorage.terabytes),
+    ]
+    static func unit(_ s: String) -> (kind: String, unit: Dimension)? {
+        let k = s.trimmingCharacters(in: .whitespaces)
+        return units.first { $0.names.contains(k) }.map { ($0.kind, $0.unit) }
+    }
+
+    /// "5 lbs in oz", "72 f to c", "10 km in miles": what to show, and the number to copy.
+    static func convert(_ raw: String) -> (shown: String, copy: String)? {
+        let t = raw.lowercased().trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "°", with: "")
+        guard let rx = try? NSRegularExpression(pattern: #"^(-?[\d.,]+)\s*([a-z/ ]+?)\s+(?:in|to|as|into)\s+([a-z/ ]+?)$"#),
+              let m = rx.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)),
+              let r1 = Range(m.range(at: 1), in: t), let r2 = Range(m.range(at: 2), in: t), let r3 = Range(m.range(at: 3), in: t),
+              let n = Double(t[r1].replacingOccurrences(of: ",", with: "")),
+              let a = unit(String(t[r2])), let b = unit(String(t[r3])), a.kind == b.kind else { return nil }
+        let v = Measurement(value: n, unit: a.unit).converted(to: b.unit).value
+        let from = t[r2].trimmingCharacters(in: .whitespaces), to = t[r3].trimmingCharacters(in: .whitespaces)
+        let rounded = (v * 1e6).rounded() / 1e6
+        return ("\(format(n)) \(from) = \(format(rounded)) \(to)", format(rounded, grouping: false))
+    }
+
+    /// "2h", "90 min", "1.5 hours", "45" (minutes): a duration in minutes, up to a day.
+    static func minutes(_ s: String) -> Int? {
+        let t = s.lowercased().trimmingCharacters(in: .whitespaces)
+        guard let rx = try? NSRegularExpression(pattern: #"^([\d.]+)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes)?$"#),
+              let m = rx.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)),
+              let r1 = Range(m.range(at: 1), in: t), let n = Double(t[r1]) else { return nil }
+        let unitText = Range(m.range(at: 2), in: t).map { String(t[$0]) } ?? "m"
+        let mins = Int((unitText.hasPrefix("h") ? n * 60 : n).rounded())
+        return mins > 0 && mins <= 24 * 60 ? mins : nil
+    }
+    static func duration(_ m: Int) -> String {
+        if m < 60 { return "\(m) minutes" }
+        if m % 60 == 0 { return m == 60 ? "1 hour" : "\(m / 60) hours" }
+        return "\(m / 60) h \(m % 60) min"
+    }
+
+    /// `FoxBuddy --self-test` (the release workflow runs it after building).
+    static func selfTest() -> Bool {
+        var ok = true
+        func check(_ name: String, _ got: String?, _ want: String?) {
+            if got != want { print("FAIL \(name): got \(got ?? "nil"), want \(want ?? "nil")"); ok = false }
+        }
+        let sums: [(String, String?)] = [
+            ("2 + 2", "4"), ("18% of 240", "43.2"), ("240 + 10%", "264"), ("100 - 25%", "75"), ("1,200 * 3", "3,600"),
+            ("(2 + 3) x 4", "20"), ("2^10", "1,024"), ("sqrt(16)", "4"), ("$45 / 3", "15"), ("10 / 4", "2.5"),
+            ("-3 * -3", "9"), ("1/3", "0.3333333333"),
+            ("42", nil), ("616-555-1234", nil), ("11/20/2026", nil), ("call mom", nil), ("milk", nil), ("1 / 0", nil),
+            ("2 +", nil), ("lock", nil),
+        ]
+        for (s, want) in sums { check(s, evaluate(s).map { format($0) }, want) }
+        check("5 lbs in oz", convert("5 lbs in oz")?.shown, "5 lbs = 80 oz")
+        check("72 f to c", convert("72°F to C")?.copy, "22.222222")
+        check("10 km in miles", convert("10 km in miles")?.copy, "6.213712")
+        check("1 cup in ml", convert("1 cup in ml")?.copy, "236.588")
+        check("5 lbs in km", convert("5 lbs in km")?.shown, nil)
+        check("2h", minutes("2h").map(String.init), "120")
+        check("90 min", minutes("90 min").map(String.init), "90")
+        check("1.5 hours", minutes("1.5 hours").map(String.init), "90")
+        check("forever", minutes("forever").map(String.init), nil)
+        print(ok ? "self-test passed" : "self-test FAILED")
+        return ok
+    }
+}
+
 final class CapturePanel: NSPanel, NSTextFieldDelegate {
     let field = NSTextField()
-    let onDone: (String?) -> Void
+    let result = NSTextField(labelWithString: ""), hint = NSTextField(labelWithString: "")
+    let onDone: (String?, Bool) -> Void                 // the text (nil: cancelled), and whether ⇧ Return forced a save
+    var preview: ((String) -> (String, String))?        // what Return would do: (the result line, a hint)
     var placeholder: String { get { field.placeholderString ?? "" } set { field.placeholderString = newValue } }
     override var canBecomeKey: Bool { true }
 
-    init(onDone: @escaping (String?) -> Void) {
+    init(onDone: @escaping (String?, Bool) -> Void) {
         self.onDone = onDone
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 56), styleMask: [.titled, .fullSizeContentView],
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 600, height: 88), styleMask: [.titled, .fullSizeContentView],
                    backing: .buffered, defer: false)
         titleVisibility = .hidden; titlebarAppearsTransparent = true
         standardWindowButton(.closeButton)?.isHidden = true
@@ -377,21 +596,36 @@ final class CapturePanel: NSPanel, NSTextFieldDelegate {
         isMovableByWindowBackground = true
         level = .floating
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let bg = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 560, height: 56))
+        let bg = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 600, height: 88))
         bg.material = .popover; bg.state = .active
         contentView = bg
-        field.frame = NSRect(x: 18, y: 14, width: 524, height: 28)
+        field.frame = NSRect(x: 18, y: 46, width: 564, height: 28)
         field.font = .systemFont(ofSize: 18)
         field.isBordered = false; field.drawsBackground = false; field.focusRingType = .none
         field.delegate = self
-        bg.addSubview(field)
+        result.frame = NSRect(x: 19, y: 14, width: 380, height: 20)
+        result.font = .systemFont(ofSize: 15, weight: .semibold); result.lineBreakMode = .byTruncatingTail
+        hint.frame = NSRect(x: 400, y: 15, width: 182, height: 18)
+        hint.font = .systemFont(ofSize: 12); hint.textColor = .secondaryLabelColor; hint.alignment = .right
+        hint.lineBreakMode = .byTruncatingTail
+        bg.addSubview(field); bg.addSubview(result); bg.addSubview(hint)
     }
 
-    func open() { field.stringValue = ""; makeKeyAndOrderFront(nil); makeFirstResponder(field) }
+    func open() { field.stringValue = ""; update(); makeKeyAndOrderFront(nil); makeFirstResponder(field) }
+    func update() {
+        let (r, h) = preview?(field.stringValue) ?? ("", "")
+        result.stringValue = r; hint.stringValue = h
+        result.textColor = field.stringValue.trimmingCharacters(in: .whitespaces).isEmpty ? .secondaryLabelColor : .labelColor
+    }
+    func controlTextDidChange(_ obj: Notification) { update() }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
-        if sel == #selector(NSResponder.insertNewline(_:)) { let t = field.stringValue; orderOut(nil); onDone(t); return true }
-        if sel == #selector(NSResponder.cancelOperation(_:)) { orderOut(nil); onDone(nil); return true }
+        if sel == #selector(NSResponder.insertNewline(_:)) || sel == #selector(NSResponder.insertLineBreak(_:))
+            || sel == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+            let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+            let t = field.stringValue; orderOut(nil); onDone(t, shift || sel != #selector(NSResponder.insertNewline(_:))); return true
+        }
+        if sel == #selector(NSResponder.cancelOperation(_:)) { orderOut(nil); onDone(nil, false); return true }
         return false
     }
     override func resignKey() { super.resignKey(); if isVisible { orderOut(nil) } }
@@ -1572,7 +1806,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         keyItems.append(NSMenuItem.separator()); keyItems.append(item("Off", #selector(pickHotKey(_:)), on: hotKeyID == "off", rep: "off"))
         m.addItem(sub("Keyboard Shortcut", keyItems))
         }
-        m.addItem(sub("Quick Capture", captureItems()))
+        m.addItem(sub("Command Bar", captureItems()))
+        m.addItem(sub("Keep the Mac Awake", awakeItems()))
         if !fox {
         m.addItem(sub("Email Alerts", emailAlertItems()))
         m.addItem(sub("Meetings", meetingItems()))
@@ -2152,6 +2387,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
             "Count Down to Meetings (colour change): \(on(meetingCountdown))",
+            "Keep the Mac Awake: \(awakeUntil.map { $0 == .distantFuture ? "on, until stopped" : "on, until \($0)" } ?? "off")",
             "Little Touches: " + [("downloads", "Catch My Downloads"), ("screenshots", "Screenshot Helper"), ("welcome", "Welcome Me Back"), ("clipboard", "React to What I Copy"), ("pounce", "Pounce at My Pointer"), ("lantern", "Lantern in Dark Mode")].map { "\($0.1) \(on(touch($0.0)))" }.joined(separator: ", "),
             "Countdowns: \(countdowns.isEmpty ? "none" : countdowns.map { "\($0[0]) on \($0[1])" }.joined(separator: ", "))",
             "Liveliness: \(calm ? "Calm" : "Lively"); Wander Around: \(on(wanderOn))",
@@ -2171,6 +2407,211 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if #available(macOS 13.0, *) { lines.append("Open at Login: \(on(SMAppService.mainApp.status == .enabled))") }
         return lines.joined(separator: "\n")
     }
+
+    // MARK: command bar (the quick-capture box, which also does things)
+
+    /// What Return would do with the text, if it's a command rather than something to save.
+    struct Command { let title: String; let hint: String; let run: () -> Void }
+
+    func command(for raw: String) -> Command? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines), low = text.lowercased()
+        guard !text.isEmpty else { return nil }
+        if let v = Calc.evaluate(text) {
+            let copy = Calc.format(v, grouping: false)
+            return Command(title: "= \(Calc.format(v))", hint: "Return copies it") { [weak self] in self?.copyResult(copy) }
+        }
+        if let c = Calc.convert(text) {
+            return Command(title: c.shown, hint: "Return copies \(c.copy)") { [weak self] in self?.copyResult(c.copy) }
+        }
+        return awakeCommand(low) ?? macCommand(low) ?? focusCommand(low) ?? openCommand(text)
+    }
+
+    func copyResult(_ s: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents(); pb.setString(s, forType: .string)
+        pasteCount = pb.changeCount                                   // (not something to react to)
+    }
+
+    func awakeCommand(_ low: String) -> Command? {
+        guard let w = ["keep awake", "stay awake", "awake", "caffeinate", "coffee"].first(where: { low == $0 || low.hasPrefix($0 + " ") }) else { return nil }
+        let rest = low.dropFirst(w.count).trimmingCharacters(in: .whitespaces)
+        if ["off", "stop", "no", "done"].contains(rest) {
+            return Command(title: "Let the Mac sleep again", hint: awakeOn ? "" : "It isn't being kept awake") { [weak self] in self?.stopAwake(announce: true) }
+        }
+        if rest.isEmpty || rest == "on" {
+            return Command(title: "Keep the Mac awake until you say stop", hint: "\"awake off\" stops it") { [weak self] in self?.keepAwake(minutes: nil) }
+        }
+        guard let m = Calc.minutes(rest.hasPrefix("for ") ? String(rest.dropFirst(4)) : rest) else { return nil }
+        return Command(title: "Keep the Mac awake for \(Calc.duration(m))", hint: "") { [weak self] in self?.keepAwake(minutes: m) }
+    }
+
+    func macCommand(_ low: String) -> Command? {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let iconsShown = UserDefaults(suiteName: "com.apple.finder")?.object(forKey: "CreateDesktop") as? Bool ?? true
+        let table: [([String], String, String, () -> Void)] = [
+            (["lock", "lock screen", "lock the screen", "lock mac", "lock my mac"], "Lock the screen", "", { [weak self] in self?.lockScreen() }),
+            (["sleep", "sleep now", "sleep mac", "go to sleep"], "Put the Mac to sleep", "", { App.background("/usr/bin/pmset", ["sleepnow"]) }),
+            (["screen saver", "screensaver"], "Start the screen saver", "", {
+                NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Library/CoreServices/ScreenSaverEngine.app")) }),
+            (["empty trash", "empty the trash"], "Empty the Trash", "You'll confirm first", { [weak self] in self?.emptyTrash() }),
+            (["dark mode", "dark", "go dark"], dark ? "Already in dark mode" : "Switch to dark mode", "", { [weak self] in self?.setDark(true) }),
+            (["light mode", "light", "go light"], dark ? "Switch to light mode" : "Already in light mode", "", { [weak self] in self?.setDark(false) }),
+            (["toggle dark mode", "toggle appearance", "appearance"], dark ? "Switch to light mode" : "Switch to dark mode", "", { [weak self] in self?.setDark(!dark) }),
+            (["hide desktop icons", "clean desktop", "clean up desktop"], iconsShown ? "Hide the icons on your desktop" : "Desktop icons are already hidden",
+             "Finder restarts", { [weak self] in self?.desktopIcons(show: false) }),
+            (["show desktop icons"], iconsShown ? "Desktop icons are already showing" : "Show the icons on your desktop", "Finder restarts", { [weak self] in self?.desktopIcons(show: true) }),
+            (["desktop icons", "toggle desktop icons"], iconsShown ? "Hide the icons on your desktop" : "Show the icons on your desktop",
+             "Finder restarts", { [weak self] in self?.desktopIcons(show: !iconsShown) }),
+            (["quit all", "quit all apps", "quit everything"], "Quit all your apps", "You'll confirm first", { [weak self] in self?.quitAll() }),
+        ]
+        guard let hit = table.first(where: { $0.0.contains(low) }) else { return nil }
+        return Command(title: hit.1, hint: hit.2, run: hit.3)
+    }
+
+    func focusCommand(_ low: String) -> Command? {
+        if ["stop focus", "focus off", "end focus"].contains(low) {
+            return Command(title: "Stop the focus session", hint: focusing ? "" : "None is running") { [weak self] in self?.stopFocus() }
+        }
+        guard low == "focus" || low.hasPrefix("focus ") else { return nil }
+        let rest = low.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        let m = rest.isEmpty ? focusMinutes : Calc.minutes(rest.hasPrefix("for ") ? String(rest.dropFirst(4)) : rest)
+        guard let mins = m, mins <= 180 else { return nil }
+        return Command(title: "Start a \(mins)-minute focus session", hint: "") { [weak self] in self?.startFocus(minutes: mins) }
+    }
+
+    /// Apps by name ("safari", "saf", "open calc"), a few folders, and web addresses.
+    var appCache: [(name: String, url: URL)] = [], appCacheAt = 0.0
+    func appList() -> [(name: String, url: URL)] {
+        let now = Date().timeIntervalSince1970
+        if now - appCacheAt < 300, !appCache.isEmpty { return appCache }
+        let fm = FileManager.default, home = fm.homeDirectoryForCurrentUser.path
+        var seen = Set<String>(), out: [(String, URL)] = []
+        for dir in ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities", home + "/Applications"] {
+            for n in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] where n.hasSuffix(".app") {
+                let name = String(n.dropLast(4))
+                if seen.insert(name.lowercased()).inserted { out.append((name, URL(fileURLWithPath: dir).appendingPathComponent(n))) }
+            }
+        }
+        appCache = out; appCacheAt = now
+        return out
+    }
+    static let WEB_ENDINGS: Set<String> = ["com", "net", "org", "io", "dev", "app", "co", "ai", "us", "edu", "gov", "me", "info", "biz", "tv", "xyz", "uk", "ca", "de", "ly", "so", "gg", "fm", "to"]
+
+    func openCommand(_ text: String) -> Command? {
+        var q = text
+        let explicit = q.lowercased().hasPrefix("open ")
+        if explicit { q = String(q.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+        let low = q.lowercased()
+        guard !low.isEmpty else { return nil }
+        // a web address
+        if !low.contains(" "), let rx = try? NSRegularExpression(pattern: #"^(https?://)?(([a-z0-9-]+\.)+([a-z]{2,}))(:\d+)?(/\S*)?$"#),
+           let m = rx.firstMatch(in: low, range: NSRange(low.startIndex..., in: low)), let tld = Range(m.range(at: 4), in: low),
+           App.WEB_ENDINGS.contains(String(low[tld])) || low.hasPrefix("http") {
+            if let url = URL(string: low.hasPrefix("http") ? q : "https://" + q) {
+                return Command(title: "Open \(q)", hint: "In your browser") { NSWorkspace.shared.open(url) }
+            }
+        }
+        // a folder
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let folders: [String: URL] = ["downloads": home.appendingPathComponent("Downloads"), "documents": home.appendingPathComponent("Documents"),
+                                      "desktop": home.appendingPathComponent("Desktop"), "pictures": home.appendingPathComponent("Pictures"),
+                                      "home": home, "home folder": home, "applications": URL(fileURLWithPath: "/Applications")]
+        if let f = folders[low] { return Command(title: "Open your \(low.capitalized) folder", hint: "") { NSWorkspace.shared.open(f) } }
+        // an app: the exact name, or what it starts with (3+ letters), or (after "open") anything containing it
+        let apps = appList()
+        let shortest: ([(name: String, url: URL)]) -> (name: String, url: URL)? = { $0.min { $0.name.count < $1.name.count } }
+        let hit = apps.first { $0.name.lowercased() == low }
+            ?? (low.count >= 3 || explicit ? shortest(apps.filter { $0.name.lowercased().hasPrefix(low) }) : nil)
+            ?? (explicit && low.count >= 2 ? shortest(apps.filter { $0.name.lowercased().contains(low) }) : nil)
+        if let a = hit {
+            return Command(title: "Open \(a.name)", hint: "") { NSWorkspace.shared.openApplication(at: a.url, configuration: NSWorkspace.OpenConfiguration()) }
+        }
+        return nil
+    }
+
+    static func background(_ tool: String, _ args: [String]) { DispatchQueue.global().async { _ = Setup.run(tool, args) } }
+
+    func lockScreen() {
+        if let h = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/Current/login", RTLD_NOW),
+           let f = dlsym(h, "SACLockScreenImmediate") {
+            typealias Lock = @convention(c) () -> Int32
+            _ = unsafeBitCast(f, to: Lock.self)()
+            return
+        }
+        App.background("/usr/bin/pmset", ["displaysleepnow"])      // locks too, if the Mac asks for the password right away
+    }
+
+    func runAppleScript(_ source: String, failed: String) {
+        DispatchQueue.global().async { [weak self] in
+            let r = Setup.run("/usr/bin/osascript", ["-e", source])
+            if r.status != 0 { DispatchQueue.main.async { self?.say(failed) } }
+        }
+    }
+    func setDark(_ on: Bool) {
+        runAppleScript("tell application \"System Events\" to tell appearance preferences to set dark mode to \(on)",
+                       failed: "I couldn't switch it. Allow me in System Settings › Privacy & Security › Automation › Fox Buddy › System Events.")
+    }
+    func emptyTrash() {
+        guard alert("Empty the Trash?", "Everything in it is deleted for good.", buttons: ["Empty Trash", "Cancel"]) == .alertFirstButtonReturn else { return }
+        runAppleScript("tell application \"Finder\" to empty trash",
+                       failed: "I couldn't empty it. Allow me in System Settings › Privacy & Security › Automation › Fox Buddy › Finder.")
+    }
+    func desktopIcons(show: Bool) {
+        DispatchQueue.global().async {
+            _ = Setup.run("/usr/bin/defaults", ["write", "com.apple.finder", "CreateDesktop", "-bool", show ? "true" : "false"])
+            _ = Setup.run("/usr/bin/killall", ["Finder"])
+        }
+    }
+    func quitAll() {
+        let me = ProcessInfo.processInfo.processIdentifier
+        let apps = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && $0.processIdentifier != me && $0.bundleIdentifier != "com.apple.finder"
+        }
+        guard !apps.isEmpty else { say("Nothing to quit."); return }
+        guard alert("Quit \(apps.count) app\(apps.count == 1 ? "" : "s")?", "Apps with unsaved work will ask you first.",
+                    buttons: ["Quit Them", "Cancel"]) == .alertFirstButtonReturn else { return }
+        apps.forEach { $0.terminate() }
+    }
+
+    /// Keep awake: no screen or idle sleep for a while (or until stopped), with a mug of coffee beside him.
+    var awakeAssertion: IOPMAssertionID = 0, awakeUntil: Date?, awakeTimer: Timer?
+    var awakeOn: Bool { awakeAssertion != 0 }
+    func keepAwake(minutes: Int?) {
+        stopAwake(announce: false)
+        var id: IOPMAssertionID = 0
+        guard IOPMAssertionCreateWithName("PreventUserIdleDisplaySleep" as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                          "Fox Buddy: Keep the Mac Awake" as CFString, &id) == kIOReturnSuccess else {
+            say("macOS wouldn't let me keep it awake."); return
+        }
+        awakeAssertion = id
+        if let m = minutes {
+            awakeUntil = Date().addingTimeInterval(Double(m) * 60)
+            awakeTimer = Timer.scheduledTimer(withTimeInterval: Double(m) * 60, repeats: false) { [weak self] _ in self?.stopAwake(announce: true) }
+        } else { awakeUntil = .distantFuture }
+        js("desk.extra('mug', true, 0)")
+        say(minutes.map { "Keeping the Mac awake for \(Calc.duration($0)). Coffee's on." } ?? "Keeping the Mac awake until you say stop. Coffee's on.")
+    }
+    func stopAwake(announce: Bool) {
+        awakeTimer?.invalidate(); awakeTimer = nil
+        let was = awakeOn
+        if was { IOPMAssertionRelease(awakeAssertion); awakeAssertion = 0 }
+        awakeUntil = nil
+        js("desk.extra('mug', null)")
+        if announce && was { say("The Mac can sleep again.") }
+    }
+    func awakeItems() -> [NSMenuItem] {
+        var items: [NSMenuItem] = []
+        if let u = awakeUntil {
+            let f = DateFormatter(); f.timeStyle = .short
+            items += [item(u == .distantFuture ? "Awake Until You Say Stop" : "Awake Until \(f.string(from: u))", nil), .separator()]
+        }
+        items += [item("For 30 Minutes", #selector(pickAwake(_:)), rep: 30), item("For 1 Hour", #selector(pickAwake(_:)), rep: 60),
+                  item("For 2 Hours", #selector(pickAwake(_:)), rep: 120), item("Until I Turn It Off", #selector(pickAwake(_:)), rep: 0)]
+        if awakeOn { items += [.separator(), item("Let It Sleep", #selector(letItSleep))] }
+        return items
+    }
+    @objc func pickAwake(_ s: NSMenuItem) { let m = s.representedObject as? Int ?? 0; keepAwake(minutes: m > 0 ? m : nil) }
+    @objc func letItSleep() { stopAwake(announce: true) }
 
     // MARK: quick capture
 
@@ -2192,25 +2633,33 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let want = captureKeyID
         if want != "off", !captureKey.register(want) {
             let t = HotKey.captureChoices.first { $0.id == want }?.title ?? want
-            say("Another app already uses \(t), so quick capture has no shortcut. Pick another under Quick Capture in my menu.")
+            say("Another app already uses \(t), so the Command Bar has no shortcut. Pick another under Command Bar in my menu.")
         }
     }
 
     @objc func openCapture() {
         if let p = capturePanel, p.isVisible { p.close(); return }
         captureReturnTo = NSWorkspace.shared.frontmostApplication
-        let p = capturePanel ?? CapturePanel(onDone: { [weak self] text in self?.captured(text) })
+        let p = capturePanel ?? CapturePanel(onDone: { [weak self] text, force in self?.captured(text, force: force) })
         capturePanel = p
-        p.placeholder = captureTo == "reminders" ? "Remind me to… (Return to save, Esc to cancel)" : "Jot it down… (Return to save, Esc to cancel)"
+        p.placeholder = captureTo == "reminders" ? "Remind me to…, or a sum, or a command" : "Jot it down…, or a sum, or a command"
+        p.preview = { [weak self] t in
+            guard let self = self else { return ("", "") }
+            let s = t.trimmingCharacters(in: .whitespaces)
+            if s.isEmpty { return ("Try 18% of 240, 5 lbs in oz, awake 1h, lock, or an app's name", "Esc closes") }
+            if let c = self.command(for: s) { return (c.title, c.hint.isEmpty ? "⇧ Return saves it instead" : c.hint) }
+            return ("", self.captureTo == "reminders" ? "Return adds it to Reminders" : "Return saves it to your inbox")
+        }
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         if let f = screen?.visibleFrame { p.setFrameOrigin(NSPoint(x: f.midX - p.frame.width / 2, y: f.maxY - f.height * 0.28)) }
         NSApp.activate(ignoringOtherApps: true)
         p.open()
     }
 
-    func captured(_ raw: String?) {
+    func captured(_ raw: String?, force: Bool = false) {
         if let app = captureReturnTo, app.processIdentifier != ProcessInfo.processInfo.processIdentifier { app.activate() }
         guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
+        if !force, let c = command(for: text) { c.run(); return }
         if captureTo == "reminders" { addReminder(String(text.prefix(500))) } else { addToInbox(String(text.prefix(2000))) }
     }
 
@@ -2260,7 +2709,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
 
     func captureItems() -> [NSMenuItem] {
-        var items = [item("Capture Something Now", #selector(openCapture)), NSMenuItem.separator(),
+        var items = [item("Open the Command Bar", #selector(openCapture)), NSMenuItem.separator(),
                      item("Save to Reminders", #selector(pickCaptureTo(_:)), on: captureTo == "reminders", rep: "reminders"),
                      item("Save to My Fox Buddy Inbox File", #selector(pickCaptureTo(_:)), on: captureTo == "inbox", rep: "inbox"),
                      item("Open My Inbox File", #selector(openInbox)), NSMenuItem.separator()]
@@ -2278,7 +2727,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         prefs.set(id, forKey: "captureKey")
         captureKey.unregister()
         setUpCaptureKey()
-        if id != "off", let c = HotKey.captureChoices.first(where: { $0.id == id }) { say("Press \(c.title) from anywhere to capture something.") }
+        if id != "off", let c = HotKey.captureChoices.first(where: { $0.id == id }) { say("Press \(c.title) from anywhere to open the Command Bar.") }
     }
     @objc func openInbox() {
         if !FileManager.default.fileExists(atPath: App.inboxFile.path) { addToInboxHeaderOnly() }
@@ -4180,6 +4629,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     @objc func quit() { NSApp.terminate(nil) }
 }
 
+if CommandLine.arguments.contains("--self-test") { exit(Calc.selfTest() ? 0 : 1) }
 signal(SIGPIPE, SIG_IGN)       // a question written to a Claude Code that already quit mustn't take the app down
 let app = NSApplication.shared
 let delegate = App()

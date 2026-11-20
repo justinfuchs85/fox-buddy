@@ -647,6 +647,18 @@
       stroke(c, [[x, y - 30], [x, y]], seed + 1031, 2.4, '#8B5A3C'); stroke(c, [[x - 18, y - 22], [x + 18, y - 22]], seed + 1032, 2, '#8B5A3C');
       if (fall >= 1) { stroke(c, [[x - 5, y - 40], [x, y - 46], [x + 5, y - 40]], seed + 1033, 2, CREAM); }             // a little ta-da
     }
+    if (X.mug) {                                                                                         // keep-awake coffee
+      const x = 202, y = 206;
+      for (let i = 0; i < 2; i++) {                                                                      // steam
+        const k = (t * 0.6 + i * 0.5) % 1, sx = x - 5 + i * 9, sy = y - 34 - k * 26;
+        c.save(); c.globalAlpha = 0.75 * (1 - k);
+        stroke(c, [[sx, sy + 8], [sx + 3 * Math.sin(t * 2 + i), sy + 4], [sx, sy], [sx - 3 * Math.sin(t * 2 + i), sy - 4]], seed + 1040 + i, 2.4, '#A9A3B8');
+        c.restore();
+      }
+      part(c, [[x + 10, y - 24], [x + 20, y - 22], [x + 21, y - 12], [x + 10, y - 9]], 'rgba(0,0,0,0)', seed + 1043, { width: 3.2 });   // handle
+      part(c, [[x - 14, y - 30, 1], [x + 12, y - 30, 1], [x + 10, y, 1], [x - 12, y, 1]], '#FFF1DC', seed + 1044, { width: 3, wobble: 0.2 });
+      part(c, [[x - 12, y - 22, 1], [x + 10, y - 22, 1], [x + 9.5, y - 15, 1], [x - 11.5, y - 15, 1]], '#FF7A45', seed + 1045, { line: false });
+    }
     if (X.flash) { c.save(); c.globalAlpha = Math.max(0, X.flash) * 0.85; c.fillStyle = '#fff'; c.beginPath(); c.arc(128, 128, 120, 0, Math.PI * 2); c.fill(); c.restore(); }
   }
 

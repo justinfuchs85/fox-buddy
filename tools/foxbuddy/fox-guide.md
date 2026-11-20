@@ -100,15 +100,39 @@ To get Spark working: install Spark Desktop and its `spark` command (from Readdl
 open, update Fox Buddy if needed, then right-click › Setup › Use Spark Mail (it only appears once he finds
 the `spark` command, in /opt/homebrew/bin, /usr/local/bin, ~/.local/bin or ~/bin).
 
-## Quick capture
+## Command Bar (quick capture, sums, commands)
 
-A second shortcut, ⌃⌥ C by default, opens a one-line box in the middle of the screen from anywhere. Type a
-thought ("call the roofer Tuesday at 3") and press Return; Escape cancels. It goes to Reminders, in the
-default list, with a due date if the text has a day or time in it (found by macOS's own date detector), or
-to a plain file, Fox Buddy Inbox.md in Documents, one line per item with the time. No Claude involved: it's
-instant and nothing leaves the Mac. If Reminders isn't allowed yet, the item goes to the inbox file instead.
-Right-click › Quick Capture: Capture Something Now, Save to Reminders, Save to My Fox Buddy Inbox File,
-Open My Inbox File, and the shortcut (⌃⌥ C, ⌃⌥ N, ⇧⌥ Space, or No Shortcut).
+A second shortcut, ⌃⌥ C by default, opens a one-line box in the middle of the screen from anywhere (Raycast
+style). Under the text it shows, as you type, what Return will do. No Claude involved: instant, and nothing
+leaves the Mac. Escape closes it. Right-click › Command Bar: Open the Command Bar, Save to Reminders, Save to
+My Fox Buddy Inbox File, Open My Inbox File, and the shortcut (⌃⌥ C, ⌃⌥ N, ⇧⌥ Space, or No Shortcut).
+
+What it understands:
+- Sums: "18% of 240" (43.2), "240 + 10%", "1,200 * 3", "(2 + 3) x 4", "2^10", "sqrt(16)". Return copies
+  the answer. A plain number, a phone number or a date isn't treated as a sum.
+- Unit conversions: "5 lbs in oz", "72 f to c", "10 km in miles", "1 cup in ml", "500 mb in gb". Length,
+  weight, temperature, cooking and liquid volume, speed and data sizes. Return copies the number.
+- Keep the Mac awake: "awake" (until stopped), "awake 2h", "awake 90 min", "awake off". Also "caffeinate".
+- Mac commands: "lock", "sleep", "screen saver", "empty trash" (asks first), "dark mode", "light mode",
+  "toggle dark mode", "hide desktop icons", "show desktop icons" (Finder restarts for those two), "quit all"
+  (asks first; apps with unsaved work ask too; Finder and Fox Buddy stay). Dark mode and emptying the Trash
+  need a one-time macOS permission (Automation › System Events or Finder).
+- Focus: "focus", "focus 45", "stop focus".
+- Open things: an app by name, or the start of its name ("saf" opens Safari; "open calc" also matches
+  inside names), a folder (downloads, documents, desktop, pictures, home, applications), or a web address
+  ("github.com", "https://…").
+- Anything else is saved: to Reminders, in the default list, with a due date if the text has a day or time
+  in it (found by macOS's own date detector), or to a plain file, Fox Buddy Inbox.md in Documents, one line
+  per item with the time. If Reminders isn't allowed yet, it goes to the inbox file. Shift-Return always
+  saves, even if the text looks like a command ("lock the back door" saves anyway; only an exact "lock"
+  locks).
+
+## Keep the Mac Awake
+
+Right-click › Keep the Mac Awake: For 30 Minutes, For 1 Hour, For 2 Hours, or Until I Turn It Off, and Let It
+Sleep to stop. While it's on, the screen doesn't dim or sleep and the Mac doesn't idle-sleep (closing a
+laptop's lid still sleeps it), and a steaming coffee mug sits beside him. The menu shows until when. Also from
+the Command Bar ("awake 2h", "awake off"). Quitting Fox Buddy ends it.
 
 ## Chatting with him
 
@@ -363,7 +387,7 @@ seconds before it appears or goes. Lively is the original, busier pace.
 The first time Fox Buddy opens, he asks: Just the Fox, or Set Up Claude Too. Just the Fox is for someone who
 doesn't use Claude: no account, no sign-in, nothing else installed. He works on his own: Focus Timer, Stretch
 Breaks, Countdowns, Little Touches (downloads, screenshots, welcome back, colours and phone numbers, pounce,
-lantern), Quick Capture, Mac Housekeeping, Site Checks, Ship Watcher, Just for Fun, Wander Around, Liveliness,
+lantern), the Command Bar, Keep the Mac Awake, Mac Housekeeping, Site Checks, Ship Watcher, Just for Fun, Wander Around, Liveliness,
 gags and clips, and all his looks and sizes. The top line of his menu says Just the Fox (No Claude), and
 the menu leaves out what needs Claude (chat, the speech bubble, morning check-in, meetings, email alerts,
 Look at My Screen, the chat shortcut). Double-clicking him says chatting needs Claude, with a Set Up Claude

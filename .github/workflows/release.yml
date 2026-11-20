@@ -137,6 +137,9 @@ jobs:
       - name: Build
         run: UNIVERSAL=1 zsh tools/foxbuddy/package.sh dist
 
+      - name: Self-test (Command Bar sums and conversions)
+        run: '"dist/Fox Buddy.app/Contents/MacOS/FoxBuddy" --self-test'
+
       - name: Check a build with Sparkle (test builds, before the update key is set up)
         if: env.HAS_SPARKLE != 'true' && startsWith(github.ref, 'refs/heads/ci/')
         run: |
