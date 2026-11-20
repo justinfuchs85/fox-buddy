@@ -197,6 +197,11 @@ second Mac has its own.
 - End-of-day wrap-up: on weekdays from 5 PM, the first time the user is at the Mac, email that still needs
   a reply, tomorrow's first meetings and reminders due. Right-click › Meetings: Wrap Up My Day Now, the
   start time (3 to 7 PM), or No Wrap-Up.
+- Quiet During Meetings (on by default, right-click › Meetings): while a meeting on the user's calendar is
+  going on, he doesn't pop up. Alerts, check-ins and Claude's news wait until it ends (he still acts things
+  out, and the chat still opens if the user opens it). He knows the meetings from the same calendar check
+  as meeting prep, so it needs Google Calendar connected (or a calendar link), and a busy block on the
+  calendar counts as a meeting.
 - Each of these is one chat with Claude and counts toward usage.
 
 ## Email alerts

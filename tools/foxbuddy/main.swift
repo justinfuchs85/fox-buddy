@@ -2059,6 +2059,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Keyboard shortcut: \(key)",
             "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
+            "Quiet During Meetings: \(on(quietInMeetings))\(inMeetingNow() ? " (in a meeting right now)" : "")",
             "Meeting prep offers: \(on(meetingPrep)); end-of-day wrap-up: \(wrapHour == 0 ? "off" : "weekdays from \(wrapHour - 12):00 PM")",
             "Email alerts: \(every == 0 ? "off" : "checked every \(every) minutes"); watching for: \(watches.isEmpty ? "nothing yet" : watches.joined(separator: "; "))",
             "Size: \(size); Look: \(lookName); Float Above Windows: \(on(!onDesktop)); Snap to Corners: \(on(snap))",
@@ -2128,11 +2129,33 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             hiddenForShare = false
             if !hiddenByUser { panel.orderFrontRegardless() }
             releaseHeld()
+        } else if heldBubble && !keepingQuiet {
+            releaseHeld()                                          // a meeting just ended
         }
     }
 
     /// Is he keeping quiet right now (sharing, or a meeting)? A bubble that would pop up waits until he isn't.
-    var keepingQuiet: Bool { hiddenForShare }
+    var keepingQuiet: Bool { hiddenForShare || (quietInMeetings && inMeetingNow()) }
+
+    /// During a meeting on your calendar (from meetings.json: anything with a set time you haven't declined or
+    /// marked free), he doesn't pop up: alerts, check-ins and Claude's news wait until it's over. He still acts
+    /// things out, and the chat still opens when you ask. Right-click › Meetings › Quiet During Meetings.
+    var quietInMeetings: Bool {
+        get { prefs.object(forKey: "quietInMeetings") as? Bool ?? true }
+        set { prefs.set(newValue, forKey: "quietInMeetings") }
+    }
+    func inMeetingNow() -> Bool {
+        let now = Date().timeIntervalSince1970
+        return meetings().contains {
+            guard let st = ($0["start"] as? NSNumber)?.doubleValue, let en = ($0["end"] as? NSNumber)?.doubleValue else { return false }
+            return st <= now && now < en && en - st <= 8 * 3600
+        }
+    }
+    @objc func toggleQuietInMeetings() {
+        quietInMeetings.toggle()
+        if !quietInMeetings { releaseHeld() }
+        say(quietInMeetings ? "During meetings I'll keep my news to myself until you're done." : "I'll speak up during meetings too.")
+    }
     func releaseHeld() {
         guard heldBubble, !keepingQuiet, !hiddenByUser, bubbleMode != "none" else { return }
         heldBubble = false
@@ -2174,13 +2197,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     /// From the minute timer: keep the list fresh, and offer prep a few minutes before each meeting.
     func checkMeetings() {
-        guard meetingPrep, ready, bubble != nil else { return }
+        guard meetingPrep || quietInMeetings, ready, bubble != nil else { return }      // (the list also keeps him quiet in meetings)
         let now = Date().timeIntervalSince1970, present = App.idleSeconds() < 300 && !hiddenByUser
         if present && !icsCalendar && !meetChecking && now - meetCheckedAt >= 30 * 60 {
             let setup = FoxSetup.load()
             if setup.calendarState == "connected" || setup.calendarState == "unknown" { refreshMeetings() }
         }
-        guard present, !asker.busy, bubbleMode != "welcome", !(bubbleMode == "chat" && bubble.isVisible) else { return }
+        guard meetingPrep, present, !asker.busy, bubbleMode != "welcome", !(bubbleMode == "chat" && bubble.isVisible) else { return }
         var offered = prefs.stringArray(forKey: "prepOffered") ?? []
         for m in meetings() {
             guard let start = (m["start"] as? NSNumber)?.doubleValue, start - now > 60, start - now <= 12 * 60 else { continue }
@@ -2296,7 +2319,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
 
     func meetingItems() -> [NSMenuItem] {
-        var items = [item("Offer Prep Before Meetings", #selector(toggleMeetingPrep), on: meetingPrep), NSMenuItem.separator(),
+        var items = [item("Offer Prep Before Meetings", #selector(toggleMeetingPrep), on: meetingPrep),
+                     item("Quiet During Meetings", #selector(toggleQuietInMeetings), on: quietInMeetings), NSMenuItem.separator(),
                      item("Wrap Up My Day Now", #selector(runWrap))]
         for h in [15, 16, 17, 18, 19] {
             items.append(item("Wrap-Up on Weekdays from \(h - 12):00 PM", #selector(pickWrapHour(_:)), on: wrapHour == h, rep: h))
