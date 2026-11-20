@@ -243,6 +243,31 @@ Software Update), and the Downloads folder over 5 GB (with Open Downloads). He o
 user is at the Mac, and the disk, update and Downloads ones after 9 AM. Right-click › Mac Housekeeping turns
 them off. He never deletes or installs anything himself.
 
+## Focus Timer
+
+Right-click › Focus Timer › Start a Focus Session (25 minutes by default; Sessions of 15, 25 or 45 Minutes
+changes it) or Start a Long Session (50 min). While it runs he types away alongside the user and keeps every
+pop-up to himself (they wait until it ends; the chat still opens if they open it). At the end he stretches
+and says to take 5, with the count for the day (Skip the break starts another); after 5 minutes he says
+the break's over, with a button for another session. Stop Focus ends one early. The end-of-day wrap-up
+mentions how many sessions were finished. Stretch-break nudges wait while a session runs.
+
+## Shortcuts and links (foxbuddy://)
+
+The Shortcuts app on the Mac can drive him with its Open URLs action (and Siri can run those shortcuts):
+
+- foxbuddy://ask?q=your question opens his chat with the question typed in; the user presses Return to
+  send it (any web page could open such a link, so nothing goes to Claude without the user).
+- foxbuddy://capture?text=call the roofer Tuesday saves straight to quick capture; foxbuddy://capture alone
+  opens the capture box.
+- foxbuddy://remember?text=… opens the chat asking him to remember it (he shows his usual Save it card).
+- foxbuddy://focus?minutes=25 starts a focus session; foxbuddy://focus?stop=1 ends it.
+- foxbuddy://chat opens the chat.
+
+Spaces in a link are fine in Shortcuts (it encodes them). These links work on the Mac Fox Buddy runs on; an
+iPhone shortcut can't reach the Mac this way. There are no Shortcuts actions listed under Fox Buddy in the
+Shortcuts app itself, only these links.
+
 ## Stretch breaks
 
 After 90 minutes of nonstop keyboard and mouse, he does a big stretch and suggests a break (a quick lap).

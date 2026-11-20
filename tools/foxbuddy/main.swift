@@ -1225,7 +1225,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         // The morning check-in: looked at once a minute.
         let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.checkBrief(); self?.checkForUpdate(); self?.checkEmailAlerts()
-            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips(); self?.checkSites(); self?.checkHousekeeping()
+            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips(); self?.checkSites(); self?.checkHousekeeping(); self?.checkFocus()
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
@@ -1556,6 +1556,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Quick Capture", captureItems()))
         m.addItem(sub("Email Alerts", emailAlertItems()))
         m.addItem(sub("Meetings", meetingItems()))
+        m.addItem(sub("Focus Timer", focusItems()))
         m.addItem(sub("Stretch Breaks", moveItems()))
         m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(sub("Site Checks", siteItems()))
@@ -2119,6 +2120,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
             "Mac Housekeeping: \(on(housekeeping))",
+            "Focus Timer: sessions of \(focusMinutes) minutes\(focusing ? ", one going now" : ""); \(focusToday().0) finished today",
             "Site Checks: \(watchSites.isEmpty ? "no sites" : watchSites.compactMap { URL(string: $0)?.host }.joined(separator: ", "))",
             "Ship Watcher: \(shipRepos.isEmpty ? "not watching any repositories" : "watching " + shipRepos.joined(separator: ", "))",
             "Stretch breaks: \(moveEvery == 0 ? "off" : "after \(moveEvery) minutes without a break")",
@@ -2264,7 +2266,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let now = Date().timeIntervalSince1970, idle = App.idleSeconds()
         if idle >= 300 { activeSince = 0; return }                 // you got up: that was a break
         if activeSince == 0 { activeSince = now - idle; return }
-        guard moveEvery > 0, ready, bubble != nil, !hiddenByUser, !hiddenForShare, !inMeetingNow(), !asker.busy,
+        guard moveEvery > 0, ready, bubble != nil, !hiddenByUser, !hiddenForShare, !focusing, !inMeetingNow(), !asker.busy,
               now - activeSince >= Double(moveEvery * 60) else { return }
         let hour = Calendar.current.component(.hour, from: Date())
         guard hour >= 7, hour < 22, !(bubbleMode == "chat" && bubble.isVisible) else { return }
@@ -2637,6 +2639,127 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         say(housekeeping ? "I'll mention low battery, a full disk, waiting updates and a bulging Downloads folder, once a day at most." : "No more Mac housekeeping from me.")
     }
 
+    // MARK: Shortcuts (foxbuddy:// links)
+
+    /// The Shortcuts app (or anything that opens a link) can drive him with foxbuddy:// links:
+    ///   foxbuddy://ask?q=…        opens his chat with the question typed in (you press Return: a web page
+    ///                             can open these links too, so nothing goes to Claude without you)
+    ///   foxbuddy://capture?text=… saves straight to quick capture (Reminders or the inbox file); no text: the box
+    ///   foxbuddy://remember?text=… opens the chat asking him to remember it (his Save it card, as usual)
+    ///   foxbuddy://focus?minutes=25 starts a focus session; foxbuddy://focus?stop=1 ends it
+    ///   foxbuddy://chat           just opens the chat
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == "foxbuddy" { handleLink(url) }
+    }
+    func handleLink(_ url: URL) {
+        let q = Dictionary((URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") },
+                           uniquingKeysWith: { a, _ in a })
+        let text = String((q["q"] ?? q["text"] ?? "").prefix(4000)).trimmingCharacters(in: .whitespacesAndNewlines)
+        switch (url.host ?? url.path).lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
+        case "ask", "chat":
+            NSApp.activate(ignoringOtherApps: true); openAsk()
+            if !text.isEmpty { bubbleJS("bubble.insertDraft(\(jsonLiteral(text)))") }
+        case "capture":
+            if text.isEmpty { openCapture() }
+            else if captureTo == "reminders" { addReminder(String(text.prefix(500))) } else { addToInbox(text) }
+        case "remember":
+            guard !text.isEmpty else { return }
+            NSApp.activate(ignoringOtherApps: true); openAsk()
+            bubbleJS("bubble.insertDraft(\(jsonLiteral("Remember this about me: " + text)))")
+        case "focus":
+            if q["stop"] != nil { stopFocus() } else { startFocus(minutes: Int(q["minutes"] ?? "") ?? focusMinutes) }
+        default:
+            say("I don't know the link \(url.absoluteString.prefix(80)). Ask me \"what foxbuddy links are there?\"")
+        }
+    }
+
+    // MARK: focus timer
+
+    /// A focus session (25 minutes by default): he works alongside you (his typing loop) and keeps every pop-up
+    /// to himself, then calls a 5-minute break with a stretch, and says when the break's over. Finished sessions
+    /// are counted for the day and mentioned in the end-of-day wrap-up. Right-click › Focus Timer, or
+    /// foxbuddy://focus?minutes=25 from Shortcuts.
+    var focusUntil = 0.0, breakUntil = 0.0, focusLength = 0
+    var focusEnd: DispatchWorkItem?
+    var focusMinutes: Int {
+        get { prefs.object(forKey: "focusMinutes") == nil ? 25 : prefs.integer(forKey: "focusMinutes") }
+        set { prefs.set(newValue, forKey: "focusMinutes") }
+    }
+    var focusing: Bool { focusUntil > Date().timeIntervalSince1970 }
+
+    @objc func startFocusDefault() { startFocus(minutes: focusMinutes) }
+    @objc func startFocusLong() { startFocus(minutes: 50) }
+    func startFocus(minutes: Int) {
+        let m = max(5, min(180, minutes))
+        focusEnd?.cancel()
+        focusLength = m; breakUntil = 0
+        focusUntil = Date().timeIntervalSince1970 + Double(m * 60)
+        js("desk.hold('working', \(min(m, 10) * 60000))")
+        say("Focus: \(m) minutes. I'll work alongside you and keep my news till after.")
+        let item = DispatchWorkItem { [weak self] in self?.focusDone() }
+        focusEnd = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(m * 60), execute: item)
+    }
+    /// From the minute timer: keep him at it (a hold lasts at most 10 minutes), and end the break.
+    func checkFocus() {
+        let now = Date().timeIntervalSince1970
+        if focusing { js("desk.hold('working', \(Int(min(600, focusUntil - now) * 1000)))") }
+        if breakUntil > 0 && now >= breakUntil {
+            breakUntil = 0
+            bubbleJump = ["focus": focusLength]; bubbleKind = "info"; bubbleMode = "say"
+            bubbleJS("bubble.show(\(jsonLiteral(["text": "Break's over.", "kind": "info", "jump": true, "jumpLabel": "Another \(focusLength) minutes"] as [String: Any])))")
+            showBubble(key: false)
+        }
+    }
+    func focusDone() {
+        focusUntil = 0; focusEnd = nil
+        logFocus(focusLength)
+        js("desk.hold('idle', 1)"); js("desk.play('stretch')")
+        breakUntil = Date().timeIntervalSince1970 + 5 * 60
+        let (n, total) = focusToday()
+        heldBubble = false
+        bubbleJump = ["focus": focusLength]; bubbleKind = "done"; bubbleMode = "say"
+        bubbleJS("bubble.show(\(jsonLiteral(["text": "That's \(focusLength) minutes. Take 5. (\(n) session\(n == 1 ? "" : "s"), \(total) minutes today.)", "kind": "done", "jump": true, "jumpLabel": "Skip the break"] as [String: Any])))")
+        showBubble(key: false)
+        releaseHeld()
+    }
+    @objc func stopFocus() {
+        guard focusing || breakUntil > 0 else { say("No focus session going."); return }
+        focusEnd?.cancel(); focusEnd = nil; focusUntil = 0; breakUntil = 0
+        js("desk.hold('idle', 1)")
+        say("Focus stopped.")
+        releaseHeld()
+    }
+    func logFocus(_ minutes: Int) {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        var log = prefs.dictionary(forKey: "focusLog") as? [String: [Int]] ?? [:]
+        let today = f.string(from: Date())
+        log[today, default: []].append(minutes)
+        prefs.set(log.filter { $0.key >= f.string(from: Date().addingTimeInterval(-14 * 86400)) }, forKey: "focusLog")
+    }
+    func focusToday() -> (Int, Int) {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        let mins = (prefs.dictionary(forKey: "focusLog") as? [String: [Int]] ?? [:])[f.string(from: Date())] ?? []
+        return (mins.count, mins.reduce(0, +))
+    }
+    func focusItems() -> [NSMenuItem] {
+        var items: [NSMenuItem] = []
+        if focusing {
+            let left = max(1, Int((focusUntil - Date().timeIntervalSince1970) / 60))
+            items.append(item("Stop Focus (\(left) min left)", #selector(stopFocus)))
+        } else {
+            items.append(item("Start a Focus Session (\(focusMinutes) min)", #selector(startFocusDefault)))
+            items.append(item("Start a Long Session (50 min)", #selector(startFocusLong)))
+        }
+        items.append(.separator())
+        items += [15, 25, 45].map { item("Sessions of \($0) Minutes", #selector(pickFocusMinutes(_:)), on: focusMinutes == $0, rep: $0) }
+        return items
+    }
+    @objc func pickFocusMinutes(_ s: NSMenuItem) {
+        guard let m = s.representedObject as? Int else { return }
+        focusMinutes = m; say("Focus sessions are \(m) minutes now.")
+    }
+
     // MARK: screen sharing
 
     /// While you share your screen (Zoom, Teams, Webex, Slack, FaceTime, or Meet in a browser) or present full
@@ -2702,7 +2825,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
 
     /// Is he keeping quiet right now (sharing, or a meeting)? A bubble that would pop up waits until he isn't.
-    var keepingQuiet: Bool { hiddenForShare || (quietInMeetings && inMeetingNow()) }
+    var keepingQuiet: Bool { hiddenForShare || focusing || (quietInMeetings && inMeetingNow()) }
 
     /// During a meeting on your calendar (from meetings.json: anything with a set time you haven't declined or
     /// marked free), he doesn't pop up: alerts, check-ins and Claude's news wait until it's over. He still acts
@@ -2914,7 +3037,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     @objc func runWrap() {
         asker.reset()
         bubbleJS("bubble.reset()")
-        asker.ask(App.WRAP_PROMPT) { [weak self] text, ok in
+        let (n, total) = focusToday()
+        let prompt = App.WRAP_PROMPT + (n > 0 ? "\nAlso say, in a few words, that I finished \(n) focus session\(n == 1 ? "" : "s") today (\(total) minutes)." : "")
+        asker.ask(prompt) { [weak self] text, ok in
             guard let self = self, !self.hiddenByUser else { return }
             self.bubbleMode = "chat"; self.bubbleJump = nil
             self.bubbleJS(ok ? "bubble.brief(\(self.jsonLiteral(text)), 'Wrap up my day, please.')" : "bubble.error(\(self.jsonLiteral("I couldn't put your wrap-up together: " + text)))")
@@ -3455,6 +3580,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             else if let u = urls[sys].flatMap(URL.init(string:)) { NSWorkspace.shared.open(u) }
             return
         }
+        if let m = j["focus"] as? Int { startFocus(minutes: m); return }
         if j["snoozeMove"] as? Bool == true {
             activeSince = Date().timeIntervalSince1970 - Double(max(0, moveEvery - 30) * 60)
             say("OK, I'll nudge you again in 30 minutes."); return

@@ -89,6 +89,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>LSUIElement</key><true/>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>com.foxbuddy.app.link</string>
+    <key>CFBundleURLSchemes</key><array><string>foxbuddy</string></array>
+  </dict></array>
   <key>NSAppSleepDisabled</key><true/>
   <key>NSHumanReadableCopyright</key><string>MIT License. Grew out of desk-buddy, by Joe Bentham.</string>
   <key>NSAppleEventsUsageDescription</key><string>So he can read your Reminders and Notes, and (only after you approve each one) add a reminder, make a note or run a shortcut.</string>
