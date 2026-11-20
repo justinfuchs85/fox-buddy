@@ -100,6 +100,16 @@ To get Spark working: install Spark Desktop and its `spark` command (from Readdl
 open, update Fox Buddy if needed, then right-click › Setup › Use Spark Mail (it only appears once he finds
 the `spark` command, in /opt/homebrew/bin, /usr/local/bin, ~/.local/bin or ~/bin).
 
+## Quick capture
+
+A second shortcut, ⌃⌥ C by default, opens a one-line box in the middle of the screen from anywhere. Type a
+thought ("call the roofer Tuesday at 3") and press Return; Escape cancels. It goes to Reminders, in the
+default list, with a due date if the text has a day or time in it (found by macOS's own date detector), or
+to a plain file, Fox Buddy Inbox.md in Documents, one line per item with the time. No Claude involved: it's
+instant and nothing leaves the Mac. If Reminders isn't allowed yet, the item goes to the inbox file instead.
+Right-click › Quick Capture: Capture Something Now, Save to Reminders, Save to My Fox Buddy Inbox File,
+Open My Inbox File, and the shortcut (⌃⌥ C, ⌃⌥ N, ⇧⌥ Space, or No Shortcut).
+
 ## Chatting with him
 
 - Open the chat: double-click him, press the keyboard shortcut (⌥ Space by default), or right-click ›

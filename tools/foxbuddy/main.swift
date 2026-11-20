@@ -324,25 +324,76 @@ final class HotKey {
         Choice(id: "shift-cmd-space", title: "⇧⌘ Space", key: UInt32(kVK_Space), mods: UInt32(shiftKey | cmdKey)),
         Choice(id: "ctrl-opt-f", title: "⌃⌥ F", key: UInt32(kVK_ANSI_F), mods: UInt32(controlKey | optionKey)),
     ]
-    static var action: (() -> Void)?
+    /// Quick capture's own shortcut (a second hotkey, slot 2).
+    static let captureChoices: [Choice] = [
+        Choice(id: "ctrl-opt-c", title: "⌃⌥ C", key: UInt32(kVK_ANSI_C), mods: UInt32(controlKey | optionKey)),
+        Choice(id: "ctrl-opt-n", title: "⌃⌥ N", key: UInt32(kVK_ANSI_N), mods: UInt32(controlKey | optionKey)),
+        Choice(id: "shift-opt-space", title: "⇧⌥ Space", key: UInt32(kVK_Space), mods: UInt32(shiftKey | optionKey)),
+    ]
+    static var actions: [UInt32: () -> Void] = [:]      // what each slot's shortcut does
+    static var action: (() -> Void)? { get { actions[1] } set { actions[1] = newValue } }
     private static var installed = false
     private var ref: EventHotKeyRef?
+    let slot: UInt32
+    init(slot: UInt32 = 1) { self.slot = slot }
 
     /// Returns false if that combination is taken. "off" (or anything unknown) just switches it off.
     func register(_ id: String) -> Bool {
         unregister()
-        guard let c = HotKey.choices.first(where: { $0.id == id }) else { return true }
+        guard let c = (HotKey.choices + HotKey.captureChoices).first(where: { $0.id == id }) else { return true }
         if !HotKey.installed {
             var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-                DispatchQueue.main.async { HotKey.action?() }; return noErr
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+                var hk = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+                                  MemoryLayout<EventHotKeyID>.size, nil, &hk)
+                let slot = hk.id
+                DispatchQueue.main.async { HotKey.actions[slot]?() }; return noErr
             }, 1, &spec, nil, nil)
             HotKey.installed = true
         }
-        let hk = EventHotKeyID(signature: OSType(0x4658_4259), id: 1)   // "FXBY"
+        let hk = EventHotKeyID(signature: OSType(0x4658_4259), id: slot)   // "FXBY"
         return RegisterEventHotKey(c.key, c.mods, hk, GetApplicationEventTarget(), 0, &ref) == noErr
     }
     func unregister() { if let r = ref { UnregisterEventHotKey(r); ref = nil } }
+}
+
+/// Quick capture's box: one line, Return saves, Escape (or clicking elsewhere) cancels.
+final class CapturePanel: NSPanel, NSTextFieldDelegate {
+    let field = NSTextField()
+    let onDone: (String?) -> Void
+    var placeholder: String { get { field.placeholderString ?? "" } set { field.placeholderString = newValue } }
+    override var canBecomeKey: Bool { true }
+
+    init(onDone: @escaping (String?) -> Void) {
+        self.onDone = onDone
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 56), styleMask: [.titled, .fullSizeContentView],
+                   backing: .buffered, defer: false)
+        titleVisibility = .hidden; titlebarAppearsTransparent = true
+        standardWindowButton(.closeButton)?.isHidden = true
+        standardWindowButton(.miniaturizeButton)?.isHidden = true
+        standardWindowButton(.zoomButton)?.isHidden = true
+        isMovableByWindowBackground = true
+        level = .floating
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let bg = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 560, height: 56))
+        bg.material = .popover; bg.state = .active
+        contentView = bg
+        field.frame = NSRect(x: 18, y: 14, width: 524, height: 28)
+        field.font = .systemFont(ofSize: 18)
+        field.isBordered = false; field.drawsBackground = false; field.focusRingType = .none
+        field.delegate = self
+        bg.addSubview(field)
+    }
+
+    func open() { field.stringValue = ""; makeKeyAndOrderFront(nil); makeFirstResponder(field) }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        if sel == #selector(NSResponder.insertNewline(_:)) { let t = field.stringValue; orderOut(nil); onDone(t); return true }
+        if sel == #selector(NSResponder.cancelOperation(_:)) { orderOut(nil); onDone(nil); return true }
+        return false
+    }
+    override func resignKey() { super.resignKey(); if isVisible { orderOut(nil) } }
 }
 
 final class BubblePanel: NSPanel {
@@ -1296,6 +1347,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             self.loadCharacter()
             self.makeBubble()
             if self.hotKeyID != "off" { self.setUpHotKey() }
+            self.setUpCaptureKey()
         }
         clampOnScreen()
         panel.orderFrontRegardless()
@@ -1501,6 +1553,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         var keyItems = HotKey.choices.map { item($0.title, #selector(pickHotKey(_:)), on: hotKeyID == $0.id, rep: $0.id) }
         keyItems.append(NSMenuItem.separator()); keyItems.append(item("Off", #selector(pickHotKey(_:)), on: hotKeyID == "off", rep: "off"))
         m.addItem(sub("Keyboard Shortcut", keyItems))
+        m.addItem(sub("Quick Capture", captureItems()))
         m.addItem(sub("Email Alerts", emailAlertItems()))
         m.addItem(sub("Meetings", meetingItems()))
         m.addItem(item("Look at My Screen", #selector(lookAtScreen)))
@@ -2057,6 +2110,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Spark Mail: \(setup.spark != nil ? "on" : FoxSetup.sparkCommand(home: NSHomeDirectory()) != nil ? "off" : "not installed")",
             "Folders he can search: \(setup.folders.isEmpty ? "none" : setup.folders.joined(separator: ", "))",
             "Keyboard shortcut: \(key)",
+            "Quick capture: shortcut \(HotKey.captureChoices.first { $0.id == captureKeyID }?.title ?? "off"), saves to \(captureTo == "reminders" ? "Reminders" : "Fox Buddy Inbox.md in Documents")",
             "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Quiet During Meetings: \(on(quietInMeetings))\(inMeetingNow() ? " (in a meeting right now)" : "")",
@@ -2068,6 +2122,123 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         ]
         if #available(macOS 13.0, *) { lines.append("Open at Login: \(on(SMAppService.mainApp.status == .enabled))") }
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: quick capture
+
+    /// A second shortcut (⌃⌥ C by default) opens a one-line box. Type a thought and press Return: it goes to
+    /// Reminders (with a due date if you wrote one, like "Tuesday at 3", found by macOS's own date detector) or
+    /// to a plain file, ~/Documents/Fox Buddy Inbox.md. No Claude involved: instant, and nothing leaves the Mac.
+    let captureKey = HotKey(slot: 2)
+    var capturePanel: CapturePanel?
+    var captureReturnTo: NSRunningApplication?
+    var captureKeyID: String { prefs.string(forKey: "captureKey") ?? "ctrl-opt-c" }
+    var captureTo: String {              // "reminders" or "inbox"
+        get { prefs.string(forKey: "captureTo") ?? (FoxSetup.load().apple ? "reminders" : "inbox") }
+        set { prefs.set(newValue, forKey: "captureTo") }
+    }
+    static let inboxFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Fox Buddy Inbox.md")
+
+    func setUpCaptureKey() {
+        HotKey.actions[2] = { [weak self] in self?.openCapture() }
+        let want = captureKeyID
+        if want != "off", !captureKey.register(want) {
+            let t = HotKey.captureChoices.first { $0.id == want }?.title ?? want
+            say("Another app already uses \(t), so quick capture has no shortcut. Pick another under Quick Capture in my menu.")
+        }
+    }
+
+    @objc func openCapture() {
+        if let p = capturePanel, p.isVisible { p.close(); return }
+        captureReturnTo = NSWorkspace.shared.frontmostApplication
+        let p = capturePanel ?? CapturePanel(onDone: { [weak self] text in self?.captured(text) })
+        capturePanel = p
+        p.placeholder = captureTo == "reminders" ? "Remind me to… (Return to save, Esc to cancel)" : "Jot it down… (Return to save, Esc to cancel)"
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        if let f = screen?.visibleFrame { p.setFrameOrigin(NSPoint(x: f.midX - p.frame.width / 2, y: f.maxY - f.height * 0.28)) }
+        NSApp.activate(ignoringOtherApps: true)
+        p.open()
+    }
+
+    func captured(_ raw: String?) {
+        if let app = captureReturnTo, app.processIdentifier != ProcessInfo.processInfo.processIdentifier { app.activate() }
+        guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
+        if captureTo == "reminders" { addReminder(String(text.prefix(500))) } else { addToInbox(String(text.prefix(2000))) }
+    }
+
+    /// The first date or time in the text ("tomorrow", "Tuesday at 3", "Dec 4"), if there is one.
+    static func dueDate(in text: String) -> Date? {
+        guard let d = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else { return nil }
+        return d.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))?.date
+    }
+
+    func addReminder(_ text: String) {
+        let due = App.dueDate(in: text)
+        var args: [String: Any] = ["title": text]
+        if let due = due { args["due"] = due.timeIntervalSince1970 * 1000 }
+        let script = """
+        function run(argv) { const a = JSON.parse(argv[0]), R = Application('Reminders'); const p = { name: a.title };
+          if (a.due) p.dueDate = new Date(a.due); const r = R.Reminder(p); R.defaultList().reminders.push(r); return R.defaultList().name(); }
+        """
+        guard let data = try? JSONSerialization.data(withJSONObject: args), let json = String(data: data, encoding: .utf8) else { return }
+        DispatchQueue.global().async { [weak self] in
+            let p = Process(), out = Pipe(), err = Pipe()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            p.arguments = ["-l", "JavaScript", "-e", script, json]
+            p.standardOutput = out; p.standardError = err
+            var ok = false
+            do { try p.run(); p.waitUntilExit(); ok = p.terminationStatus == 0 } catch {}
+            let list = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if ok {
+                    let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short; f.doesRelativeDateFormatting = true
+                    self.say("Added to \(list.isEmpty ? "Reminders" : list)\(due.map { ", due \(f.string(from: $0))" } ?? "").")
+                } else {
+                    self.addToInbox(text, note: "Reminders didn't let me in (System Settings › Privacy & Security › Automation › Fox Buddy), so")
+                }
+            }
+        }
+    }
+
+    func addToInbox(_ text: String, note: String? = nil) {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
+        let line = "- [ ] \(text.replacingOccurrences(of: "\n", with: " ")) (\(f.string(from: Date())))\n"
+        let url = App.inboxFile, fm = FileManager.default
+        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: Data("# Fox Buddy Inbox\n\n".utf8)) }
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+        say((note.map { $0 + " " } ?? "") + "\(note == nil ? "J" : "j")otted it in your Fox Buddy Inbox (Documents).")
+    }
+
+    func captureItems() -> [NSMenuItem] {
+        var items = [item("Capture Something Now", #selector(openCapture)), NSMenuItem.separator(),
+                     item("Save to Reminders", #selector(pickCaptureTo(_:)), on: captureTo == "reminders", rep: "reminders"),
+                     item("Save to My Fox Buddy Inbox File", #selector(pickCaptureTo(_:)), on: captureTo == "inbox", rep: "inbox"),
+                     item("Open My Inbox File", #selector(openInbox)), NSMenuItem.separator()]
+        items += HotKey.captureChoices.map { item("Shortcut: \($0.title)", #selector(pickCaptureKey(_:)), on: captureKeyID == $0.id, rep: $0.id) }
+        items.append(item("No Shortcut", #selector(pickCaptureKey(_:)), on: captureKeyID == "off", rep: "off"))
+        return items
+    }
+    @objc func pickCaptureTo(_ s: NSMenuItem) {
+        guard let to = s.representedObject as? String else { return }
+        captureTo = to
+        say(to == "reminders" ? "Captures go to Reminders. Write a day or time and I'll set it as the due date." : "Captures go to Fox Buddy Inbox.md in your Documents.")
+    }
+    @objc func pickCaptureKey(_ s: NSMenuItem) {
+        guard let id = s.representedObject as? String else { return }
+        prefs.set(id, forKey: "captureKey")
+        captureKey.unregister()
+        setUpCaptureKey()
+        if id != "off", let c = HotKey.captureChoices.first(where: { $0.id == id }) { say("Press \(c.title) from anywhere to capture something.") }
+    }
+    @objc func openInbox() {
+        if !FileManager.default.fileExists(atPath: App.inboxFile.path) { addToInboxHeaderOnly() }
+        NSWorkspace.shared.open(App.inboxFile)
+    }
+    func addToInboxHeaderOnly() {
+        try? FileManager.default.createDirectory(at: App.inboxFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: App.inboxFile.path, contents: Data("# Fox Buddy Inbox\n\n".utf8))
     }
 
     // MARK: screen sharing
