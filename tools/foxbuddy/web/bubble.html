@@ -377,7 +377,8 @@
     reset() { turns.length = 0; $('thread').innerHTML = ''; setBusy(false); $('input').value = ''; setFiles(false); report(); },
   };
   const CALENDAR_TOOLS = ['create_event', 'update_event', 'delete_event', 'respond_to_event'], GMAIL_TOOLS = ['create_draft', 'update_draft'];
-  const APPLE_TOOLS = { reminders_add: 'Reminders', reminders_complete: 'Reminders', notes_create: 'Notes', shortcuts_run: 'Shortcut' };
+  const APPLE_TOOLS = { reminders_add: 'Reminders', reminders_complete: 'Reminders', notes_create: 'Notes', shortcuts_run: 'Shortcut',
+                        spark_draft: 'Spark draft', spark_action: 'Spark' };   // his own tools (Spark Mail is Readdle's, through its spark command)
   // {tool, summary, input} from a fox-confirm block, or null if it isn't one of the change tools with an arguments object.
   function proposal(body) {
     let p; try { p = JSON.parse(body); } catch (e) { return null; }
@@ -398,6 +399,7 @@
     const warn = local ? ''
       : calendar && emails.length && ask.tool !== 'delete_event' ? `<div class="warn">Google Calendar may email: ${esc(emails.join(', '))}</div>`
       : ask.tool === 'shortcuts_run' ? '<div class="warn">A shortcut can do anything it\'s built to do. Only run ones you know.</div>'
+      : ask.tool === 'spark_draft' ? '<div class="note">Saved as a draft in Spark. Nothing is sent or shared.</div>'
       : apple ? ''
       : !calendar ? '<div class="note">Saved as a draft in Gmail. Nothing is sent.</div>' : '';
     const rows = Object.entries(ask.input || {}).map(([k, v]) => `<div><span class="k">${esc(k)}</span> ${esc(shown(v))}</div>`).join('');

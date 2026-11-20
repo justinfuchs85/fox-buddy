@@ -390,6 +390,7 @@ struct FoxSetup {
     var gmailState = "unknown"          // connected, needs-auth, failed, missing, or unknown (never checked)
     var calendarState = "unknown"
     var apple = true                    // Reminders, Notes and Shortcuts (Setup › Use Reminders, Notes & Shortcuts)
+    var spark: String?                  // the `spark` command (Spark Mail), if it's installed and switched on (Setup › Use Spark Mail)
 
     static func load() -> FoxSetup {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -421,7 +422,14 @@ struct FoxSetup {
         if let n = prefs.string(forKey: "foxName"), !n.isEmpty { setup.foxName = n }
         if let st = prefs.string(forKey: "style"), ["facts", "wit", "comedian"].contains(st) { setup.style = st }
         setup.apple = prefs.object(forKey: "appleApps") as? Bool ?? true
+        if prefs.object(forKey: "sparkMail") as? Bool ?? true { setup.spark = FoxSetup.sparkCommand(home: home) }
         return setup
+    }
+
+    /// Readdle's `spark` command (Spark Mail's CLI), where its installer or Homebrew put it. nil if it isn't installed.
+    static func sparkCommand(home: String) -> String? {
+        ["/opt/homebrew/bin/spark", "/usr/local/bin/spark", home + "/.local/bin/spark", home + "/bin/spark",
+         "/Applications/Spark Desktop.app/Contents/Resources/bin/spark"].first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     /// Is this a file or folder he was allowed to find? (For "Show in Finder": symlinks resolved first.)
@@ -552,6 +560,9 @@ let CALENDAR_CHANGE = ["create_event", "update_event", "delete_event", "respond_
 // Reminders, Notes and Shortcuts (his own foxbuddy tools, with --apple): reading is his; a change needs your OK
 let APPLE_READ = ["reminders_lists", "reminders_list", "notes_search", "notes_read", "shortcuts_list"]
 let APPLE_CHANGE = ["reminders_add", "reminders_complete", "notes_create", "shortcuts_run"]
+// Spark Mail (his own foxbuddy tools, with --spark): reading is his; a draft or an action on emails needs your OK
+let SPARK_READ = ["spark_mail"]
+let SPARK_CHANGE = ["spark_draft", "spark_action"]
 
 /// One change you approved in his bubble: a single connector tool (its full name, mcp__…) with exactly
 /// these arguments. The gate (foxtools.py --gate) lets that call through once and refuses any other.
@@ -569,6 +580,7 @@ struct Approval {
         if CALENDAR_CHANGE.contains(short) { prefix = "mcp__\(setup.calendar)__" }
         else if GMAIL_CHANGE.contains(short) { prefix = "mcp__\(setup.gmail)__" }
         else if setup.apple && APPLE_CHANGE.contains(short) { prefix = "mcp__foxbuddy__" }
+        else if setup.spark != nil && SPARK_CHANGE.contains(short) { prefix = "mcp__foxbuddy__" }
         else { return nil }
         return Approval(tool: prefix + short, summary: String(summary.prefix(500)), input: input)
     }
@@ -742,7 +754,7 @@ final class Asker {
         where a setting is, privacy, why something isn't working, or what their settings are now), call the foxbuddy \
         about_fox_buddy tool first and answer from it, giving menu paths exactly as it does. Never guess about your own \
         features, menus or settings: if the guide doesn't cover it, say you're not sure and suggest Setup › Report a Problem….
-        - The web: WebSearch.\(setup.apple ? "\n- Reminders, Notes and Shortcuts (Apple's apps on this Mac), with the foxbuddy tools: read reminder lists and open reminders (reminders_lists, reminders_list), find and read notes (notes_search, notes_read), list shortcuts (shortcuts_list). The first time, macOS asks the user to allow it: if a tool says it isn't allowed, tell them where to switch it on." : "")
+        - The web: WebSearch.\(setup.spark != nil ? "\n- Spark Mail (the Spark email app on this Mac; it may hold several email accounts, calendars, contacts, team inboxes and meeting transcripts), with the foxbuddy spark_mail tool: list, search and read email, events, free time, contacts, teams and meeting transcripts. Spark Desktop has to be open: if a tool says it isn't running, ask them to open it. When they say \"in Spark\", or mean the accounts that live there, use it rather than Gmail." : "")\(setup.apple ? "\n- Reminders, Notes and Shortcuts (Apple's apps on this Mac), with the foxbuddy tools: read reminder lists and open reminders (reminders_lists, reminders_list), find and read notes (notes_search, notes_read), list shortcuts (shortcuts_list). The first time, macOS asks the user to allow it: if a tool says it isn't allowed, tell them where to switch it on." : "")
         \(Asker.connectorLine(setup.gmailState, "Gmail", "search and read email", "email"))
         \(Asker.connectorLine(setup.calendarState, "Google Calendar", "see calendars, events and free time", "the calendar"))
         Those are the only apps you can use. The user may have other apps connected to Claude (Figma, Slack, Notion, Google Drive \
@@ -768,7 +780,7 @@ final class Asker {
         ```fox-confirm
         {"tool": "update_event", "summary": "Move \\"Dentist\\" from Thu 2:00 PM to Fri 3:00 PM", "input": {"...": "the exact arguments"}}
         ```
-        tool is one of \(CALENDAR_CHANGE.joined(separator: ", ")) (Google Calendar), \(GMAIL_CHANGE.joined(separator: ", ")) (Gmail drafts)\(setup.apple ? ", or " + APPLE_CHANGE.joined(separator: ", ") + " (Reminders, Notes, Shortcuts; foxbuddy tools, so their parameters are already in your tool list)" : ""). \
+        tool is one of \(CALENDAR_CHANGE.joined(separator: ", ")) (Google Calendar), \(GMAIL_CHANGE.joined(separator: ", ")) (Gmail drafts)\(setup.apple ? ", or " + APPLE_CHANGE.joined(separator: ", ") + " (Reminders, Notes, Shortcuts; foxbuddy tools, so their parameters are already in your tool list)" : "")\(setup.spark != nil ? ", or " + SPARK_CHANGE.joined(separator: ", ") + " (Spark Mail: a draft, never sent, or an action like archive or snooze on emails; foxbuddy tools)" : ""). \
         One change per reply. The user sees the summary and every argument, and gets a button to approve it. Only then can you make \
         that call, and only with exactly those arguments. Never add attendees, guests or recipients the user didn't ask for.
 
@@ -827,6 +839,7 @@ final class Asker {
         let gm = "mcp__\(setup.gmail)__", cal = "mcp__\(setup.calendar)__"
         var allowed: [String] = ["WebSearch", "mcp__foxbuddy__find_files", "mcp__foxbuddy__activity", "mcp__foxbuddy__about_fox_buddy"]
         if setup.apple { allowed += APPLE_READ.map { "mcp__foxbuddy__" + $0 } }
+        if setup.spark != nil { allowed += SPARK_READ.map { "mcp__foxbuddy__" + $0 } }
         for x in setup.extras { allowed += x.allowed }            // your own extra tools (fox-tools.json)
         allowed += GMAIL_READ.map { gm + $0 }
         allowed += CALENDAR_READ.map { cal + $0 }
@@ -859,6 +872,7 @@ final class Asker {
         for f in setup.folders { foxArgs += ["--folder", f] }
         for d in setup.activityDirs { foxArgs += ["--activity-dir", d] }
         if setup.apple { foxArgs.append("--apple") }
+        if let sp = setup.spark { foxArgs += ["--spark", sp] }
         // His guide to himself (fox-guide.md, next to foxtools.py) and your current settings, for about_fox_buddy.
         foxArgs += ["--guide", URL(fileURLWithPath: foxtools).deletingLastPathComponent().appendingPathComponent("fox-guide.md").path,
                     "--settings", Asker.settingsFile.path]
@@ -1514,6 +1528,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         setupItems.append(item("Connect Gmail & Calendar…", #selector(connectGoogle)))
         setupItems.append(item("Check Connections", #selector(checkConnectionsNow)))
         setupItems.append(item("Use Reminders, Notes & Shortcuts", #selector(toggleAppleApps), on: FoxSetup.load().apple))
+        if FoxSetup.sparkCommand(home: NSHomeDirectory()) != nil {
+            setupItems.append(item("Use Spark Mail", #selector(toggleSpark), on: FoxSetup.load().spark != nil))
+        }
         setupItems.append(item("Watch the Claude Desktop App", Setup.watcher == nil ? nil : #selector(toggleWatching), on: Setup.watching))
         setupItems.append(item("Browser Extension for claude.ai…", #selector(showExtension)))
         setupItems.append(.separator())
@@ -2011,6 +2028,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         say(on ? "I'll use Reminders, Notes and Shortcuts again. macOS asks you once for each, the first time." : "I won't use Reminders, Notes or Shortcuts.")
     }
 
+    @objc func toggleSpark() {
+        let on = FoxSetup.load().spark == nil
+        prefs.set(on, forKey: "sparkMail")
+        say(on ? "I'll use Spark Mail too. Keep Spark open, and I'll ask before drafting or doing anything to an email."
+               : "I won't use Spark Mail.")
+    }
+
     /// His current settings in plain words, for about_fox_buddy ("is my wrap-up on?", "what's my shortcut?").
     func settingsText() -> String {
         let setup = FoxSetup.load(), alerts = EmailAlerts.load()
@@ -2027,6 +2051,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Claude plan: \(prefs.bool(forKey: "freePlan") ? "free (chat features don't work)" : "paid, or not known")",
             "Gmail connector: \(setup.gmailState); Google Calendar connector: \(setup.calendarState)",
             "Reminders, Notes & Shortcuts: \(on(setup.apple))",
+            "Spark Mail: \(setup.spark != nil ? "on" : FoxSetup.sparkCommand(home: NSHomeDirectory()) != nil ? "off" : "not installed")",
             "Folders he can search: \(setup.folders.isEmpty ? "none" : setup.folders.joined(separator: ", "))",
             "Keyboard shortcut: \(key)",
             "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
