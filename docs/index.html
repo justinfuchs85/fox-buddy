@@ -132,7 +132,17 @@
   .muted { color: var(--muted); }
   .all { columns: 3 300px; column-gap: 48px; margin-top: 30px; }
   .group { break-inside: avoid; margin-bottom: 38px; }
-  .group h3 { margin-bottom: 8px; }
+  .group h4 { font: 700 20px/1.2 'Shantell Sans', system-ui, sans-serif; margin: 0 0 8px; }
+  .group ul + h4 { margin-top: 34px; }
+  .plan { display: inline-block; vertical-align: 2px; margin-left: 6px; font: 400 13px/1 'Atkinson Hyperlegible', sans-serif; color: var(--cream);
+    background: var(--dusk-low); border-radius: 999px; padding: 5px 9px 4px; white-space: nowrap; }
+  .part { margin-top: 44px; padding: 34px 36px 6px; background: var(--dusk-high);
+    border: var(--line) solid var(--cream); border-radius: 26px 22px 28px 20px / 22px 28px 20px 26px; }
+  .part + .part { background: var(--dusk-low); }
+  .part-head { max-width: 680px; }
+  .part-head h3 { font-size: clamp(24px, 2.6vw, 30px); }
+  .part-head p { color: var(--muted); margin-top: 8px; }
+  @media (max-width: 520px) { .part { padding: 24px 20px 4px; } }
   .feats { list-style: none; padding: 0; margin: 0; }
   .feats li { padding: 9px 0; border-top: 2px dashed rgba(255,241,220,.14); font-size: 16px; line-height: 1.5; color: var(--muted); }
   .feats strong { color: var(--cream); }
@@ -227,100 +237,107 @@
   <section class="wrap" id="everything">
     <div class="col">
       <h2>Everything he does</h2>
-      <p class="lead-in">The full list. Almost all of it can be switched on or off from his right-click menu, and you can ask him about any of it.</p>
+      <p class="lead-in">A lot of him works with no Claude at all, so he's worth having even if you've never used it. Almost everything can be switched on or off from his right-click menu.</p>
     </div>
-    <div class="all">
-      <div class="group">
-        <h3>Reacting to Claude</h3>
-        <ul class="feats">
-          <li><strong>Claude Code.</strong> Acts out every session: thinking, typing, waiting on you, done. Show me brings that terminal forward.</li>
-          <li><strong>claude.ai in Chrome or Safari,</strong> through his browser extension. It tells him Claude is working, never what you typed.</li>
-          <li><strong>The Claude desktop app,</strong> if you switch it on.</li>
-          <li><strong>Speech bubble levels.</strong> Everything Claude does, only when Claude needs you or finishes, or nothing.</li>
-          <li><strong>Recaps.</strong> When a Claude Code job runs three minutes or more, a two-sentence summary of what got done.</li>
-          <li><strong>Usage limits.</strong> He turns red as your Claude usage fills up.</li>
-          <li><strong>Bubbles that tidy up.</strong> Quick lines vanish in seconds; anything waiting on you stays a minute. Hovering pauses the timer.</li>
-        </ul>
+
+    <div class="part">
+      <div class="part-head">
+        <h3>On his own</h3>
+        <p>No Claude, no account, nothing else to install. Download him and these just work.</p>
       </div>
-      <div class="group">
-        <h3>Chatting with him</h3>
-        <ul class="feats">
-          <li><strong>⌥ Space from anywhere,</strong> or double-click him. The shortcut can be changed or turned off.</li>
-          <li><strong>Talk instead of type</strong> with the mic button (macOS Dictation).</li>
-          <li><strong>Web search</strong> for anything current.</li>
-          <li><strong>Your files.</strong> Finds them by name in Desktop, Documents and Downloads, and reads inside one only after you click to allow it.</li>
-          <li><strong>Drop a file on him.</strong> PDFs, documents, spreadsheets as CSV, images.</li>
-          <li><strong>Look at my screen.</strong> A picture of your screen, only when you press the button, and nothing goes until you send.</li>
-          <li><strong>Gmail and Google Calendar</strong> through your claude.ai connectors.</li>
-          <li><strong>Reminders, Notes and Shortcuts</strong> on your Mac.</li>
-          <li><strong>Spark Mail,</strong> if you have Spark Desktop's command-line tools: every account, threads, events, transcripts.</li>
-          <li><strong>Steps and workouts</strong> from an iPhone Shortcut.</li>
-          <li><strong>Changes, with your OK.</strong> Add or move an event, draft an email, add a reminder, make a note, run a shortcut, archive or snooze in Spark. One card, one yes, one change.</li>
-          <li><strong>Remembers what you tell him,</strong> once you OK it. What He Knows About You shows it all.</li>
-          <li><strong>Hands off bigger jobs</strong> to Claude or Claude Code, with the whole conversation carried over.</li>
-          <li><strong>Knows himself.</strong> Ask what he can do or how to set something up.</li>
-        </ul>
+      <div class="all">
+        <div class="group">
+          <h4>Your day</h4>
+          <ul class="feats">
+            <li><strong>Focus timer.</strong> 15, 25, 45 or 50 minutes; he works alongside you, holds every pop-up, then tells you to take five.</li>
+            <li><strong>Stretch breaks</strong> after an hour or two nonstop at the keyboard.</li>
+            <li><strong>Countdowns.</strong> Name a day and he holds up a sign each morning ("Vacation: 12 days"), then celebrates on the day.</li>
+            <li><strong>Welcome back</strong> after you've been away a while, with how long you were gone.</li>
+            <li><strong>Friday at 5,</strong> a little dance for the weekend.</li>
+            <li><strong>Birthdays</strong> from your Contacts, if you turn them on.</li>
+          </ul>
+        </div>
+        <div class="group">
+          <h4>Watching things for you</h4>
+          <ul class="feats">
+            <li><strong>Downloads catcher.</strong> A parcel drops in when a download finishes, with Show in Finder.</li>
+            <li><strong>Screenshot helper.</strong> A camera flash, and an offer to move it off your Desktop into Pictures › Screenshots.</li>
+            <li><strong>Mac housekeeping.</strong> Low battery, a nearly full disk, a waiting macOS update, an overstuffed Downloads folder. Once a day at most.</li>
+            <li><strong>Site checks.</strong> Loads your websites every five minutes and tells you when one goes down, and when it's back.</li>
+            <li><strong>Ship Watcher.</strong> Waves an "It's live!" flag when a GitHub release or deploy goes out, and says which step failed if it doesn't.</li>
+          </ul>
+          <h4>Jotting things down</h4>
+          <ul class="feats">
+            <li><strong>⌃⌥ C anywhere</strong> opens a one-line box. Type a thought and it goes to Reminders, with a due date if you mentioned one, or to an inbox file. Nothing leaves your Mac.</li>
+            <li><strong>Copy a phone number</strong> and he offers to call it.</li>
+          </ul>
+        </div>
+        <div class="group">
+          <h4>Just being a fox</h4>
+          <ul class="feats">
+            <li><strong>Naps</strong> when nothing's going on, and sleeps from midnight to 8.</li>
+            <li><strong>Wakes up when you come over.</strong> Click or hover and he yawns and waves, and his eyes follow your pointer.</li>
+            <li><strong>Wanders.</strong> Now and then he hops up and sits on top of the window you're working in, then heads home.</li>
+            <li><strong>Pounces</strong> when you wiggle the pointer next to him.</li>
+            <li><strong>Jams along</strong> with a boombox over his head while Apple Music or Spotify plays.</li>
+            <li><strong>Paint chips.</strong> Copy a colour code and he holds up a swatch of it.</li>
+            <li><strong>A lantern</strong> beside him in dark mode after 6 PM.</li>
+            <li><strong>Gags and clips</strong> on demand, or Show Off to loop every mood.</li>
+            <li><strong>Calm or Lively.</strong> Calm, the default, keeps him from switching moods every few seconds.</li>
+          </ul>
+          <h4>Fitting into your Mac</h4>
+          <ul class="feats">
+            <li><strong>Hides while you share your screen</strong> or present, and comes back after.</li>
+            <li><strong>Four sizes and three looks,</strong> floating above your windows or sitting on the desktop. Drag him anywhere.</li>
+            <li><strong>Updates himself</strong> with one click, or through Homebrew.</li>
+          </ul>
+        </div>
       </div>
-      <div class="group">
-        <h3>Your day</h3>
-        <ul class="feats">
-          <li><strong>Morning check-in.</strong> Today's meetings and the email that needs you, the first time you sit down.</li>
-          <li><strong>Meeting prep</strong> ten minutes before: what it's about, recent email with those people, what to bring.</li>
-          <li><strong>Join button</strong> a minute before any call with a video link.</li>
-          <li><strong>Meeting countdown,</strong> if you want it: he slides from orange to electric blue over the last ten minutes.</li>
-          <li><strong>Quiet during meetings.</strong> His news waits until the meeting's over.</li>
-          <li><strong>End-of-day wrap-up.</strong> Unanswered email, tomorrow's first meetings, reminders due.</li>
-          <li><strong>Email alerts.</strong> Tell him who or what to watch for and he holds up a letter when it lands.</li>
-          <li><strong>Focus timer.</strong> 15, 25, 45 or 50 minutes; he works alongside you, holds every pop-up, then tells you to take five.</li>
-          <li><strong>Stretch breaks</strong> after an hour or two nonstop at the keyboard, with today's steps if you've set that up.</li>
-          <li><strong>Countdowns.</strong> Name a day and he holds up a sign each morning ("Vacation: 12 days"), then celebrates on the day.</li>
-        </ul>
+    </div>
+
+    <div class="part">
+      <div class="part-head">
+        <h3>With Claude</h3>
+        <p>Reacting to Claude works with any Claude account, free included. Chatting, and everything that reads your email or calendar, runs on Claude Code, which comes with Claude Pro or Max. He installs it and signs you in himself.</p>
       </div>
-      <div class="group">
-        <h3>Watching things for you</h3>
-        <ul class="feats">
-          <li><strong>Ship Watcher.</strong> Waves an "It's live!" flag when a GitHub release or deploy goes out, and says which step failed if it doesn't.</li>
-          <li><strong>Site checks.</strong> Loads your websites every five minutes and tells you when one goes down, and when it's back.</li>
-          <li><strong>Mac housekeeping.</strong> Low battery, a nearly full disk, a waiting macOS update, an overstuffed Downloads folder. Once a day at most.</li>
-          <li><strong>Downloads catcher.</strong> A parcel drops in when a download finishes, with Show in Finder.</li>
-          <li><strong>Screenshot helper.</strong> A camera flash, and an offer to move it off your Desktop into Pictures › Screenshots.</li>
-        </ul>
-      </div>
-      <div class="group">
-        <h3>Quick capture and shortcuts</h3>
-        <ul class="feats">
-          <li><strong>⌃⌥ C anywhere</strong> opens a one-line box. Type a thought and it goes to Reminders, with a due date if you mentioned one, or to an inbox file. No Claude, nothing leaves your Mac.</li>
-          <li><strong>foxbuddy:// links</strong> let the Shortcuts app and Siri ask him a question, capture something, start a focus session or open his chat.</li>
-        </ul>
-      </div>
-      <div class="group">
-        <h3>Just being a fox</h3>
-        <ul class="feats">
-          <li><strong>Naps</strong> when nothing's going on, and sleeps from midnight to 8.</li>
-          <li><strong>Wakes up when you come over.</strong> Click or hover and he yawns and waves; his eyes follow your pointer and he watches you type.</li>
-          <li><strong>Welcome back</strong> after you've been away a while, with how long you were gone.</li>
-          <li><strong>Wanders.</strong> Now and then he hops up and sits on top of the window you're working in, then heads home.</li>
-          <li><strong>Pounces</strong> when you wiggle the pointer next to him.</li>
-          <li><strong>Jams along</strong> with a boombox over his head while Apple Music or Spotify plays.</li>
-          <li><strong>Paint chips.</strong> Copy a colour code and he holds up a swatch of it. Copy a phone number and he offers to call it.</li>
-          <li><strong>A lantern</strong> beside him in dark mode after 6 PM.</li>
-          <li><strong>Friday at 5,</strong> a little dance for the weekend.</li>
-          <li><strong>Birthdays</strong> from your Contacts, if you turn them on.</li>
-          <li><strong>Gags and clips</strong> on demand, or Show Off to loop every mood.</li>
-          <li><strong>Calm or Lively.</strong> Calm, the default, keeps him from switching moods every few seconds.</li>
-        </ul>
-      </div>
-      <div class="group">
-        <h3>Fitting into your Mac</h3>
-        <ul class="feats">
-          <li><strong>Hides while you share your screen</strong> or present, and comes back after.</li>
-          <li><strong>Four sizes and three looks,</strong> floating above your windows or sitting on the desktop.</li>
-          <li><strong>Drag him anywhere.</strong> He snaps to the nearest corner unless you'd rather he didn't.</li>
-          <li><strong>Opens at login</strong> if you like.</li>
-          <li><strong>Updates himself</strong> with one click, or through Homebrew.</li>
-          <li><strong>Works on company networks.</strong></li>
-          <li><strong>Report a Problem</strong> shows you exactly what it sends before it sends anything.</li>
-        </ul>
+      <div class="all">
+        <div class="group">
+          <h4>Reacting to Claude <span class="plan">any Claude account</span></h4>
+          <ul class="feats">
+            <li><strong>claude.ai in Chrome or Safari,</strong> through his browser extension. It tells him Claude is working, never what you typed.</li>
+            <li><strong>The Claude desktop app,</strong> if you switch it on.</li>
+            <li><strong>Claude Code.</strong> Acts out every session: thinking, typing, waiting on you, done. Show me brings that terminal forward.</li>
+            <li><strong>Speech bubble levels.</strong> Everything Claude does, only when Claude needs you or finishes, or nothing.</li>
+            <li><strong>Usage limits.</strong> He turns red as your Claude usage fills up.</li>
+          </ul>
+        </div>
+        <div class="group">
+          <h4>Chatting with him <span class="plan">Pro or Max</span></h4>
+          <ul class="feats">
+            <li><strong>⌥ Space from anywhere,</strong> or double-click him. Type, or talk with the mic button.</li>
+            <li><strong>Web search</strong> for anything current.</li>
+            <li><strong>Your files.</strong> Finds them by name in Desktop, Documents and Downloads, and reads inside one only after you allow it. Or drop a file on him.</li>
+            <li><strong>Look at my screen,</strong> only when you press the button, and nothing goes until you send.</li>
+            <li><strong>Gmail and Google Calendar</strong> through your claude.ai connectors.</li>
+            <li><strong>Reminders, Notes and Shortcuts</strong> on your Mac, and <strong>Spark Mail</strong> if you use it.</li>
+            <li><strong>Changes, with your OK.</strong> Add or move an event, draft an email, add a reminder, make a note, run a shortcut. One card, one yes, one change. He never sends email.</li>
+            <li><strong>Remembers what you tell him,</strong> once you OK it.</li>
+            <li><strong>Hands off bigger jobs</strong> to Claude or Claude Code, with the whole conversation carried over.</li>
+            <li><strong>Knows himself.</strong> Ask what he can do or how to set something up.</li>
+          </ul>
+        </div>
+        <div class="group">
+          <h4>Your day, with Claude <span class="plan">Pro or Max</span></h4>
+          <ul class="feats">
+            <li><strong>Morning check-in.</strong> Today's meetings and the email that needs you, the first time you sit down.</li>
+            <li><strong>Meeting prep</strong> ten minutes before: what it's about, recent email with those people, what to bring.</li>
+            <li><strong>Join button</strong> a minute before any call with a video link.</li>
+            <li><strong>Quiet during meetings,</strong> and an optional countdown where he slides from orange to electric blue.</li>
+            <li><strong>End-of-day wrap-up.</strong> Unanswered email, tomorrow's first meetings, reminders due.</li>
+            <li><strong>Email alerts.</strong> Tell him who or what to watch for and he holds up a letter when it lands.</li>
+            <li><strong>Recaps.</strong> When a Claude Code job runs three minutes or more, a two-sentence summary of what got done.</li>
+          </ul>
+        </div>
       </div>
     </div>
   </section>
@@ -330,8 +347,9 @@
       <h2>What you need</h2>
       <ul class="needs">
         <li><strong>A Mac</strong> with macOS 12 Monterey or later. Apple silicon and Intel both work.</li>
-        <li><strong>Claude Pro or Max.</strong> His chat runs on Claude Code, which comes with those plans. On the free plan he still reacts to Claude, but he can't chat.</li>
-        <li><strong>That's it.</strong> He installs Claude Code and signs you in himself, so there's no Terminal involved.</li>
+        <li><strong>That's all, for everything under On his own.</strong> No account, no sign-in.</li>
+        <li><strong>Any Claude account, free included,</strong> for him to react while Claude works in your browser or the Claude app.</li>
+        <li><strong>Claude Pro or Max</strong> to chat with him and for anything that reads your email or calendar. That runs on Claude Code, which he installs and signs you in to himself, so there's no Terminal involved.</li>
       </ul>
     </div>
   </section>
