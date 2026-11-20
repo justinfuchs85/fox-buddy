@@ -62,6 +62,12 @@ Free and open source (MIT), from https://justinfuchs85.github.io/fox-buddy/. mac
 - Reminders, Notes and Shortcuts: right-click › Setup › Use Reminders, Notes & Shortcuts. macOS asks
   once for each app the first time he uses it. If it was refused: System Settings › Privacy & Security ›
   Automation › Fox Buddy.
+- Spark Mail: if Readdle's `spark` command is installed (it comes with Spark Desktop's command-line tools),
+  right-click › Setup › Use Spark Mail switches it on or off. Spark Desktop has to be open while he uses it.
+  He reads email, events, free time, contacts, teams and meeting transcripts from every account in Spark.
+  He can save a draft (never sent or shared) or archive, snooze, pin, mute, mark done or seen, or move
+  emails, each only after the user approves that exact change. He never trashes, marks as spam,
+  unsubscribes, comments, or does anything for a team.
 - Claude in the browser: right-click › Setup › Browser Extension for claude.ai… shows how to add his
   extension to Chrome or Safari, so he reacts to claude.ai chats too. It tells him only that Claude is working,
   never what anyone typed.
@@ -100,6 +106,7 @@ Free and open source (MIT), from https://justinfuchs85.github.io/fox-buddy/. mac
 - Read Gmail: search, threads, messages, drafts.
 - Read Google Calendar: calendars, events, free time.
 - Read Reminders and Notes, and list Shortcuts (when switched on).
+- Read Spark Mail, when it's installed and switched on (see Signing in and connecting things).
 - Read the user's activity summary (steps, workouts).
 - With the user's approval, one exact change at a time: add, move or delete a calendar event, write a
   Gmail draft, add or complete a reminder, make a note, or run a shortcut.
