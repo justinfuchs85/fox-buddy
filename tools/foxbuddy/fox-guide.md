@@ -358,6 +358,18 @@ once at the end of a real stretch of Claude's work instead of after every turn, 
 glances where the pointer stops instead of following every movement, and lets the boombox settle for a few
 seconds before it appears or goes. Lively is the original, busier pace.
 
+## Just the Fox (without Claude)
+
+The first time Fox Buddy opens, he asks: Just the Fox, or Set Up Claude Too. Just the Fox is for someone who
+doesn't use Claude: no account, no sign-in, nothing else installed. He works on his own: Focus Timer, Stretch
+Breaks, Countdowns, Little Touches (downloads, screenshots, welcome back, colours and phone numbers, pounce,
+lantern), Quick Capture, Mac Housekeeping, Site Checks, Ship Watcher, Just for Fun, Wander Around, Liveliness,
+gags and clips, and all his looks and sizes. The top line of his menu says Just the Fox (No Claude), and
+the menu leaves out what needs Claude (chat, the speech bubble, morning check-in, meetings, email alerts,
+Look at My Screen, the chat shortcut). Double-clicking him says chatting needs Claude, with a Set Up Claude
+button. To add Claude later: right-click › Setup › Set Up Claude…; it installs his helper, then Claude Code,
+then signs in (chatting needs Claude Pro or Max). He still offers his own updates in Just the Fox.
+
 ## Little Touches
 
 Right-click › Little Touches. Small things he notices on the Mac by himself, no Claude involved. All on by

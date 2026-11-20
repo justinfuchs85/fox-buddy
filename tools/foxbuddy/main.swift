@@ -1206,7 +1206,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         self.webDir = webDir
         DispatchQueue.global().async { Asker.forget(except: nil); Asker.clearGates(); try? FileManager.default.removeItem(at: App.dropsDir) }   // last time's chats, gate files and dropped pictures
         DispatchQueue.global().async { Setup.refreshBridge() }                           // an updated app brings its bridge along
-        if Setup.installed && !prefs.bool(forKey: "welcomed") {
+        if Setup.installed && !prefs.bool(forKey: "welcomed") && !justFox {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.startWelcome() }   // the first time: get acquainted
         }
         if !Setup.installed && Bundle.main.url(forResource: "support", withExtension: nil) != nil && !prefs.bool(forKey: "setupOffered") {
@@ -1550,8 +1550,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     func menu() -> NSMenu {
         let m = NSMenu()
-        m.addItem(item(bridgeConnected ? "Connected to the bridge" : "On his own (the bridge isn't connected)", nil))
+        m.addItem(item(justFox ? "Just the Fox (No Claude)" : bridgeConnected ? "Connected to the bridge" : "On his own (the bridge isn't connected)", nil))
         m.addItem(.separator())
+        let fox = justFox
+        if !fox {
         m.addItem(item("Ask a Question… (or Double-Click Him)", #selector(askFromMenu)))
         let talk = [("all", "Everything Claude Does"), ("important", "Only When Claude Needs Me or Finishes"), ("off", "Nothing")]
         var talkItems = talk.map { item($0.1, #selector(pickNarrate(_:)), on: narrate == $0.0, rep: $0.0) }
@@ -1569,9 +1571,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         var keyItems = HotKey.choices.map { item($0.title, #selector(pickHotKey(_:)), on: hotKeyID == $0.id, rep: $0.id) }
         keyItems.append(NSMenuItem.separator()); keyItems.append(item("Off", #selector(pickHotKey(_:)), on: hotKeyID == "off", rep: "off"))
         m.addItem(sub("Keyboard Shortcut", keyItems))
+        }
         m.addItem(sub("Quick Capture", captureItems()))
+        if !fox {
         m.addItem(sub("Email Alerts", emailAlertItems()))
         m.addItem(sub("Meetings", meetingItems()))
+        }
         m.addItem(sub("Focus Timer", focusItems()))
         m.addItem(sub("Just for Fun", funItems()))
         m.addItem(sub("Little Touches", touchItems()))
@@ -1583,7 +1588,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(sub("Site Checks", siteItems()))
         m.addItem(item("Mac Housekeeping", #selector(toggleHousekeeping), on: housekeeping))
-        m.addItem(item("Look at My Screen", #selector(lookAtScreen)))
+        if !fox { m.addItem(item("Look at My Screen", #selector(lookAtScreen))) }
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
         var gagItems = [item("A Random Gag", #selector(playNamed(_:)), rep: "tap"), NSMenuItem.separator()]
@@ -1605,7 +1610,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             m.addItem(item("Open at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         }
         m.addItem(.separator())
-        var setupItems: [NSMenuItem] = [item("Set Up Fox Buddy…", #selector(setUp))]
+        var setupItems: [NSMenuItem] = [item(fox ? "Set Up Claude…" : "Set Up Fox Buddy…", #selector(setUp))]
+        if !fox {
         setupItems.append(item("Sign In to Claude…", #selector(signIn)))
         setupItems.append(item("Introduce Yourselves Again…", #selector(startWelcome)))
         setupItems.append(item("Connect Gmail & Calendar…", #selector(connectGoogle)))
@@ -1616,6 +1622,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         setupItems.append(item("Watch the Claude Desktop App", Setup.watcher == nil ? nil : #selector(toggleWatching), on: Setup.watching))
         setupItems.append(item("Browser Extension for claude.ai…", #selector(showExtension)))
+        }
         setupItems.append(.separator())
         setupItems.append(item("Check for Updates…", #selector(checkUpdates)))
         setupItems.append(item("Report a Problem…", #selector(reportProblem)))
@@ -1635,17 +1642,19 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         return a.runModal()
     }
     func offerSetup() {
-        let r = alert("Set up Fox Buddy?", """
-        To keep an eye on Claude for you, Fox Buddy installs two things:
+        let r = alert("Meet Fox Buddy", """
+        He's happy to keep you company on his own: a focus timer, stretch breaks, countdowns, help with downloads \
+        and screenshots, Mac checkups, and plenty of fox business. No account needed.
 
-        • A small helper that runs in the background (in ~/.desk-buddy) and turns what Claude is doing into his moods.
-        • Hooks and a status line in Claude Code's settings (~/.claude/settings.json, backed up first; your own hooks stay).
+        If you use Claude, he can also act out what Claude is doing, and chat with you (chatting needs Claude Pro \
+        or Max). That adds a small helper in ~/.desk-buddy and a few lines in Claude Code's settings, backed up first.
 
-        You can do this later from his right-click menu: Setup › Set Up Fox Buddy….
-        """, buttons: ["Set Up", "Not Now"])
-        if r == .alertFirstButtonReturn { setUp() }
+        You can change your mind later: right-click him › Setup.
+        """, buttons: ["Just the Fox", "Set Up Claude Too"])
+        if r == .alertSecondButtonReturn { setUp() } else { chooseJustFox() }
     }
     @objc func setUp() {
+        if justFox { prefs.set(false, forKey: "justFox"); setUpHotKey() }
         DispatchQueue.global().async {
             let report = Setup.install()
             DispatchQueue.main.async {
@@ -1937,7 +1946,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func offerUpdate(force: Bool = false) {
         guard let rel = updateOffer, bubble != nil, !hiddenByUser, !asker.busy, bubbleMode != "welcome",
               force || (prefs.string(forKey: "updateSkipped") != rel.version && App.idleSeconds() < 120
-                        && prefs.bool(forKey: "welcomed") && !(bubbleMode == "chat" && bubble.isVisible)) else { return }
+                        && (prefs.bool(forKey: "welcomed") || justFox) && !(bubbleMode == "chat" && bubble.isVisible)) else { return }
         prefs.set(rel.version, forKey: "updateSkipped")          // mention each version once (Not now means not again)
         bubbleMode = "chat"; bubbleJump = nil
         bubbleJS("bubble.chat(false)")
@@ -2129,6 +2138,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let every = EmailAlerts.every(alerts), watches = EmailAlerts.watches(alerts).compactMap { $0["label"] as? String }
         var lines = [
             "Fox Buddy version: \(App.version)",
+            "Mode: \(justFox ? "Just the Fox (no Claude; chose it at first launch)" : "with Claude")",
             "His name: \(setup.foxName); chattiness: \(["facts": "just the facts", "comedian": "full comedian"][setup.style] ?? "a little wit")",
             "Connected to the bridge (reacting to Claude): \(bridgeConnected ? "yes" : "no")",
             "Claude plan: \(prefs.bool(forKey: "freePlan") ? "free (chat features don't work)" : "paid, or not known")",
@@ -3037,6 +3047,32 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         say(wanderOn ? "Every so often I'll hop over and sit on the window you're in. Drag me anywhere to change where home is." : "I'll stay in my corner.")
     }
 
+    // MARK: just the fox (no Claude)
+
+    /// Chose "Just the Fox" at first launch: everything that works without Claude, and nothing that asks for it.
+    /// Set Up Claude… (in his menu, or the button when someone double-clicks him) switches it off.
+    var justFox: Bool { prefs.bool(forKey: "justFox") }
+    /// Whether opening his chat makes sense. (Without Claude Code installed, the chat itself says how to get it.)
+    var canChat: Bool { !justFox }
+
+    func chooseJustFox() {
+        prefs.set(true, forKey: "justFox")
+        hotKey.unregister()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self = self else { return }
+            js("desk.wake()")
+            say("Hi! I'm all yours. Right-click me any time to see what I can do. Try Focus Timer, Countdowns or Just for Fun.")
+        }
+    }
+    /// Someone wants to chat but he has no Claude: say so kindly, with the way to add it.
+    func explainNoChat() {
+        guard bubble != nil else { return }
+        bubbleJump = ["setUp": true]; bubbleKind = "info"; bubbleMode = "say"
+        let text = "Chatting with me needs Claude (Pro or Max). Everything else in my right-click menu works without it."
+        bubbleJS("bubble.show(\(jsonLiteral(["text": text, "kind": "info", "jump": true, "jumpLabel": "Set Up Claude"] as [String: Any])))")
+        showBubble(key: false)
+    }
+
     // MARK: little touches (downloads, screenshots, welcome back, clipboard, countdowns, pounce, lantern)
 
     func touch(_ key: String) -> Bool { prefs.object(forKey: "touch." + key) as? Bool ?? true }
@@ -3402,7 +3438,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     /// From the minute timer: keep the list fresh, and offer prep a few minutes before each meeting.
     func checkMeetings() {
-        guard meetingPrep || quietInMeetings || joinButton, ready, bubble != nil else { return }   // (the list also keeps him quiet, and Join)
+        guard meetingPrep || quietInMeetings || joinButton, ready, bubble != nil, !justFox || icsCalendar else { return }   // (the list also keeps him quiet, and Join)
         checkJoin()
         let now = Date().timeIntervalSince1970, present = App.idleSeconds() < 300 && !hiddenByUser
         if present && !icsCalendar && !meetChecking && now - meetCheckedAt >= 30 * 60 {
@@ -3685,7 +3721,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// From the minute timer: check when it's time, you're at the Mac, Gmail is connected and he isn't busy.
     func checkEmailAlerts(force: Bool = false) {
         let d = EmailAlerts.load(), w = EmailAlerts.watches(d), every = EmailAlerts.every(d)
-        guard !w.isEmpty, force || every > 0, !alertChecking, ready else { return }
+        guard !w.isEmpty, force || every > 0, !alertChecking, ready, !justFox else { return }
         let last = d["checked"] as? Double ?? 0, now = Date().timeIntervalSince1970
         guard force || (now - last >= Double(every) * 60 - 5 && App.idleSeconds() < 300 && !hiddenByUser) else { return }
         let setup = FoxSetup.load()
@@ -3767,6 +3803,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// At launch, and when you pick one. If yours is taken, he tries the others in turn and says which he got.
     func setUpHotKey(announce: Bool = false) {
         HotKey.action = { [weak self] in self?.toggleChat() }
+        if justFox { hotKey.unregister(); return }                      // nothing to open without Claude
         let want = hotKeyID
         if hotKey.register(want) {
             if announce, let c = HotKey.choices.first(where: { $0.id == want }) { say("Press \(c.title) from anywhere to chat with me.") }
@@ -3809,6 +3846,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
 
     func openAsk() {
         guard bubble != nil else { return }
+        guard canChat else { explainNoChat(); return }
         bubbleMode = "chat"; bubbleJump = nil
         bubbleJS("bubble.chat()")
         showBubble(key: true)
@@ -4119,6 +4157,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             return
         }
         if let m = j["focus"] as? Int { startFocus(minutes: m); return }
+        if j["setUp"] as? Bool == true { setUp(); return }
         if let path = j["reveal"] as? String { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]); return }
         if let paths = j["fileShots"] as? [String] { fileScreenshots(paths); return }
         if let tel = j["tel"] as? String, tel.allSatisfy({ $0.isNumber || $0 == "+" }), let u = URL(string: "tel:" + tel) { NSWorkspace.shared.open(u); return }
