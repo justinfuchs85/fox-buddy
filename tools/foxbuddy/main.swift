@@ -1225,7 +1225,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         // The morning check-in: looked at once a minute.
         let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.checkBrief(); self?.checkForUpdate(); self?.checkEmailAlerts()
-            self?.checkMeetings(); self?.checkWrap()
+            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement()
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
@@ -1556,6 +1556,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Quick Capture", captureItems()))
         m.addItem(sub("Email Alerts", emailAlertItems()))
         m.addItem(sub("Meetings", meetingItems()))
+        m.addItem(sub("Stretch Breaks", moveItems()))
         m.addItem(item("Look at My Screen", #selector(lookAtScreen)))
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
@@ -2114,6 +2115,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
+            "Stretch breaks: \(moveEvery == 0 ? "off" : "after \(moveEvery) minutes without a break")",
             "Quiet During Meetings: \(on(quietInMeetings))\(inMeetingNow() ? " (in a meeting right now)" : "")",
             "Meeting prep offers: \(on(meetingPrep)); end-of-day wrap-up: \(wrapHour == 0 ? "off" : "weekdays from \(wrapHour - 12):00 PM")",
             "Email alerts: \(every == 0 ? "off" : "checked every \(every) minutes"); watching for: \(watches.isEmpty ? "nothing yet" : watches.joined(separator: "; "))",
@@ -2240,6 +2242,66 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func addToInboxHeaderOnly() {
         try? FileManager.default.createDirectory(at: App.inboxFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: App.inboxFile.path, contents: Data("# Fox Buddy Inbox\n\n".utf8))
+    }
+
+    // MARK: movement nudges
+
+    /// After a long stretch of nonstop keyboard and mouse (90 minutes by default), he stretches and suggests a
+    /// break. Five minutes away from the Mac counts as a break and starts the clock over. Not during a meeting,
+    /// a share, or at night. With an activity summary (the iPhone Shortcut), he mentions today's steps.
+    var activeSince = 0.0
+    var moveEvery: Int {                 // minutes (0 = off)
+        get { prefs.object(forKey: "moveEvery") == nil ? 90 : prefs.integer(forKey: "moveEvery") }
+        set { prefs.set(newValue, forKey: "moveEvery") }
+    }
+    func checkMovement() {
+        let now = Date().timeIntervalSince1970, idle = App.idleSeconds()
+        if idle >= 300 { activeSince = 0; return }                 // you got up: that was a break
+        if activeSince == 0 { activeSince = now - idle; return }
+        guard moveEvery > 0, ready, bubble != nil, !hiddenByUser, !hiddenForShare, !inMeetingNow(), !asker.busy,
+              now - activeSince >= Double(moveEvery * 60) else { return }
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard hour >= 7, hour < 22, !(bubbleMode == "chat" && bubble.isVisible) else { return }
+        activeSince = now
+        let mins = moveEvery
+        let time = mins == 60 ? "An hour" : mins == 120 ? "Two hours" : "\(mins) minutes"
+        var text = "\(time) straight at the keyboard. Stretch break? A quick lap would do it."
+        if let steps = App.stepsToday() { text += " You're at \(steps) steps today." }
+        js("desk.play('stretch')")
+        bubbleJump = ["snoozeMove": true]; bubbleKind = "info"; bubbleMode = "say"
+        bubbleJS("bubble.show(\(jsonLiteral(["text": text, "kind": "info", "jump": true, "jumpLabel": "In 30 minutes"] as [String: Any])))")
+        showBubble(key: false)
+    }
+    /// Today's step count, from the newest activity summary, if it was updated today and says one.
+    static func stepsToday() -> String? {
+        let fm = FileManager.default
+        var newest: (Date, URL)?
+        for d in FoxSetup.load().activityDirs {
+            for name in (try? fm.contentsOfDirectory(atPath: d)) ?? [] where !name.hasPrefix(".") {
+                let u = URL(fileURLWithPath: d).appendingPathComponent(name)
+                if let m = (try? fm.attributesOfItem(atPath: u.path))?[.modificationDate] as? Date, newest == nil || m > newest!.0 { newest = (m, u) }
+            }
+        }
+        guard let (when, url) = newest, Calendar.current.isDateInToday(when),
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        for p in [#"(\d[\d,]*)\s*steps"#, #"steps\D{0,15}(\d[\d,]*)"#] {
+            if let re = try? NSRegularExpression(pattern: p, options: .caseInsensitive),
+               let m = re.matches(in: text, range: NSRange(text.startIndex..., in: text)).last,
+               let r = Range(m.range(at: 1), in: text) {
+                let digits = text[r].filter(\.isNumber)
+                if let n = Int(digits), n > 0 { let f = NumberFormatter(); f.numberStyle = .decimal; return f.string(from: NSNumber(value: n)) }
+            }
+        }
+        return nil
+    }
+    func moveItems() -> [NSMenuItem] {
+        [60, 90, 120].map { item("Every \($0 == 60 ? "Hour" : $0 == 90 ? "90 Minutes" : "2 Hours")", #selector(pickMoveEvery(_:)), on: moveEvery == $0, rep: $0) }
+            + [item("No Nudges", #selector(pickMoveEvery(_:)), on: moveEvery == 0, rep: 0)]
+    }
+    @objc func pickMoveEvery(_ s: NSMenuItem) {
+        guard let m = s.representedObject as? Int else { return }
+        moveEvery = m; activeSince = 0
+        say(m == 0 ? "No more stretch reminders." : "After \(m == 60 ? "an hour" : m == 90 ? "90 minutes" : "2 hours") at it without a break, I'll suggest a stretch.")
     }
 
     // MARK: screen sharing
@@ -3053,6 +3115,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func jump(_ j: [String: Any]?) {
         guard let j = j else { return }
         if let key = j["prep"] as? String { runPrep(key); return }
+        if j["snoozeMove"] as? Bool == true {
+            activeSince = Date().timeIntervalSince1970 - Double(max(0, moveEvery - 30) * 60)
+            say("OK, I'll nudge you again in 30 minutes."); return
+        }
         if let u = (j["url"] as? String).flatMap(URL.init(string:)), u.scheme == "https" { NSWorkspace.shared.open(u); return }
         if let raw = j["app"] as? String {
             let id = TERMINAL_APPS[raw] ?? raw

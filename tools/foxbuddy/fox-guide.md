@@ -217,6 +217,14 @@ second Mac has its own.
   calendar counts as a meeting.
 - Each of these is one chat with Claude and counts toward usage.
 
+## Stretch breaks
+
+After 90 minutes of nonstop keyboard and mouse, he does a big stretch and suggests a break (a quick lap).
+With the activity summary from the iPhone Shortcut, he adds today's step count. Five minutes away from the
+Mac counts as a break and starts the clock over. Never during a meeting, a screen share, or before 7 AM or
+after 10 PM. The bubble's "In 30 minutes" button snoozes it. Right-click › Stretch Breaks: Every Hour, Every
+90 Minutes, Every 2 Hours, or No Nudges.
+
 ## Email alerts
 
 Tell him who or what to watch for ("tell me when anything from Jane comes in", "alert me about the

@@ -284,6 +284,16 @@
     if (m === 'night') continue;
     event(`tap_${g}_${m}`, m, beat(GAG[g]));
   }
+  // stretch: you've been at it a while. Arms straight up, a lean to each side, arms wide, a satisfied shake.
+  // (Fox Buddy plays it with a nudge to get up and move; it's not one of the tap gags.)
+  const STRETCH = [[6, { eyes: 'squint', mouth: 'o', squash: -0.04, armL: [96, 104], armR: [160, 104] }],
+    [12, { eyes: 'closed', mouth: 'o', squash: -0.11, y: -3, perk: 0.95, armL: [84, 66], armR: [172, 66], tail: 0.2 }],
+    [10, { eyes: 'closed', mouth: 'flat', squash: -0.09, lean: -0.14, tilt: -0.08, armL: [74, 76], armR: [166, 58], tail: 0.35 }],
+    [10, { eyes: 'closed', mouth: 'flat', squash: -0.09, lean: 0.14, tilt: 0.08, armL: [90, 58], armR: [182, 76], tail: -0.1 }],
+    [8, { eyes: 'closed', mouth: 'grin', squash: -0.06, armL: [70, 108], armR: [186, 108], earL: 0.15, earR: 0.15 }],
+    [3, { eyes: 'happy', mouth: 'smile', squash: 0.06, hx: -2, earL: -0.1, earR: 0.1 }], [3, { eyes: 'happy', mouth: 'smile', squash: 0.04, hx: 2, earL: 0.1, earR: -0.1 }],
+    [3, { eyes: 'happy', mouth: 'smile', squash: 0.05, hx: -2 }], [12, { eyes: 'happy', mouth: 'open', blush: true, tail: 0.3 }]];
+  for (const m of MOMENTS) if (m !== 'night') event(`stretch_${m}`, m, beat(STRETCH));
   // at night only a soft startle: one eye opens, he grumbles, back to sleep
   const N = firstPose.night;
   CLIPS.tap_startle_night = { home: 'night', seq: seq('startle', smoothFrom(N, beat([[3, { squash: 0.06, earL: 0.1, earR: 0.1 }], [8, { eyes: 'squint', earR: 0, mouth: 'flat' }], [10, { eyes: 'squint', mouth: 'wobble', brows: 'cross' }], [6, { eyes: 'closed', mouth: 'flat' }], [10, {}]], N))) };

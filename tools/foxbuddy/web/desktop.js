@@ -396,6 +396,7 @@
 
   window.desk = {
     line, tap, wake, watch, follow, hold, setLook, said, hit, act: setAct, present: setPresent,
+    play: n => playEvent(String(n)),          // one of his clips by name (stretch: the version for whatever mood he's in)
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
     state: () => ({ target, curMood, playing: cur.key, kind: cur.kind, act, offline, prepMode, overlay: [ovWorking, ovWaiting, ovUnseen], tint: hex(tintNow) }),
     // for tests: jump the clock forward
