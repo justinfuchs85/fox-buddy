@@ -1227,13 +1227,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.checkBrief(); self?.checkForUpdate(); self?.checkEmailAlerts()
             self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips(); self?.checkSites(); self?.checkHousekeeping(); self?.checkFocus()
-            self?.checkFriday(); self?.checkBirthdays(); self?.jam()
+            self?.checkFriday(); self?.checkBirthdays(); self?.jam(); self?.checkWander()
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
         let presence = Timer(timeInterval: 30, repeats: true) { [weak self] _ in self?.checkPresence() }
         let sharing = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.checkSharing() }
         RunLoop.main.add(sharing, forMode: .common)
+        let perch = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkPerch() }
+        RunLoop.main.add(perch, forMode: .common)
         RunLoop.main.add(presence, forMode: .common)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.checkPresence() }
         // Which connectors Claude Code has: shortly after launch, then every 6 hours.
@@ -1395,9 +1397,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         guard prefs.object(forKey: "x") != nil else { return nil }
         return NSPoint(x: prefs.double(forKey: "x"), y: prefs.double(forKey: "y"))
     }
-    func saveOrigin() { prefs.set(Double(panel.frame.minX), forKey: "x"); prefs.set(Double(panel.frame.minY), forKey: "y"); placeBubble() }
+    func saveOrigin() {
+        if wandering { placeBubble(); return }                    // out wandering: home stays where it was
+        prefs.set(Double(panel.frame.minX), forKey: "x"); prefs.set(Double(panel.frame.minY), forKey: "y"); placeBubble()
+    }
 
     func moved() {
+        if wandering { stopTravel(); wandering = false; perchWindow = nil; js("desk.face(1)"); js("desk.unhold('hop')") }
         if snap {
             let f = visibleFrame(), mid = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
             let c = (mid.y > f.midY ? "T" : "B") + (mid.x < f.midX ? "L" : "R")
@@ -1566,6 +1572,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Focus Timer", focusItems()))
         m.addItem(sub("Just for Fun", funItems()))
         m.addItem(sub("Liveliness", livelinessItems()))
+        m.addItem(sub("Wander Around", [item("Wander Around Now and Then", #selector(toggleWander), on: wanderOn),
+                                        item("Go Sit on My Window", #selector(wanderNow))]))
         m.addItem(sub("Stretch Breaks", moveItems()))
         m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(sub("Site Checks", siteItems()))
@@ -2129,7 +2137,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
             "Count Down to Meetings (colour change): \(on(meetingCountdown))",
-            "Liveliness: \(calm ? "Calm" : "Lively")",
+            "Liveliness: \(calm ? "Calm" : "Lively"); Wander Around: \(on(wanderOn))",
             "Mac Housekeeping: \(on(housekeeping))",
             "Just for Fun: Jam Along to Music \(on(jamAlong)), Friday at 5 Celebration \(on(celebrations)), Birthdays from Contacts \(on(birthdays))",
             "Focus Timer: sessions of \(focusMinutes) minutes\(focusing ? ", one going now" : ""); \(focusToday().0) finished today",
@@ -2903,6 +2911,125 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         say(calm ? "Calm it is: fewer switches, longer moods, one celebration per job." : "Lively it is. I contain multitudes.")
     }
 
+    // MARK: wandering
+
+    /// Every so often, when he's got nothing on and you're around, he hops over to the window you're working in,
+    /// jumps up and sits on its top edge for a minute or so, then hops back to his corner. He comes straight home
+    /// if that window moves or closes, a share starts, or you open his chat; drag him and wherever you drop him is
+    /// home. Calm: about every 25-45 minutes; Lively: every 8-15. Right-click › Wander Around.
+    var wanderOn: Bool {
+        get { prefs.object(forKey: "wander") as? Bool ?? true }
+        set { prefs.set(newValue, forKey: "wander") }
+    }
+    var wandering = false, wanderHome = NSPoint.zero, nextWander = 0.0
+    var wanderLegs: [(from: NSPoint, to: NSPoint, secs: Double, jump: Bool)] = []
+    var legStart = 0.0, wanderTick: Timer?, perchUntil = 0.0, perchWindow: (id: Int, frame: CGRect)?
+
+    func checkWander() {
+        let now = Date().timeIntervalSince1970
+        if nextWander == 0 { nextWander = now + Double.random(in: calmGaze ? 900...1800 : 300...600) }
+        guard wanderOn, !wandering, now >= nextWander, ready, panel != nil, !hiddenByUser, !keepingQuiet,
+              App.idleSeconds() < 60, !(bubble?.isVisible ?? false), !asker.busy, !snapPending else { return }
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard hour >= 8, hour < 22 else { return }
+        nextWander = now + Double.random(in: calmGaze ? 1500...2700 : 480...900)
+        wanderNow()
+    }
+    var snapPending: Bool { grab?.dragging ?? false }
+
+    /// The top edge of the window you're working in, if he can sit on it: same screen, wide enough, room above.
+    func perchSpot() -> (origin: NSPoint, id: Int, frame: CGRect)? {
+        guard let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+              let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: panel.frame.midX, y: panel.frame.midY)) }) else { return nil }
+        let primaryH = NSScreen.screens.first?.frame.height ?? screen.frame.height
+        for w in list {
+            guard (w[kCGWindowOwnerPID as String] as? Int32) == front.processIdentifier, (w[kCGWindowLayer as String] as? Int) == 0,
+                  let b = w[kCGWindowBounds as String] as? NSDictionary, let id = w[kCGWindowNumber as String] as? Int else { continue }
+            var r = CGRect.zero; _ = CGRectMakeWithDictionaryRepresentation(b, &r)
+            let top = primaryH - r.minY                                         // Cocoa y of the window's top edge
+            let size = panel.frame.size, sit = size.height * 37 / 240           // his feet are this far above the panel's bottom
+            let vis = screen.visibleFrame
+            guard r.width >= size.width * 2.2, r.height >= 200, top + size.height - sit <= vis.maxY - 4, top - sit >= vis.minY,
+                  r.minX >= vis.minX - 2, r.maxX <= vis.maxX + 2, !(r.width >= screen.frame.width - 2 && r.height >= screen.frame.height - 30) else { return nil }
+            let x = Double.random(in: Double(r.minX + 24)...Double(max(r.minX + 24, r.maxX - size.width - 24)))
+            return (NSPoint(x: x, y: top - sit), id, r)
+        }
+        return nil
+    }
+
+    @objc func wanderNow() {
+        guard !wandering, let spot = perchSpot() else { return }
+        wandering = true; wanderHome = panel.frame.origin; perchWindow = (spot.id, spot.frame)
+        let floor = NSPoint(x: spot.origin.x, y: wanderHome.y)
+        var legs: [(from: NSPoint, to: NSPoint, secs: Double, jump: Bool)] = []
+        let walk = abs(floor.x - wanderHome.x)
+        if walk > 8 { legs.append((wanderHome, floor, max(0.6, Double(walk) / 220), false)) }
+        legs.append((walk > 8 ? floor : wanderHome, spot.origin, 0.75, true))
+        js("desk.hold('hop', 60000)")
+        travel(legs) { [weak self] in
+            guard let self = self else { return }
+            self.js("desk.face(1)"); self.js("desk.unhold('hop')")
+            self.perchUntil = Date().timeIntervalSince1970 + Double.random(in: self.calmGaze ? 50...110 : 25...60)
+        }
+    }
+
+    /// Back to his corner: a jump down to his own level, then hop home.
+    func wanderHomeNow(teleport: Bool = false) {
+        guard wandering else { return }
+        perchUntil = 0; perchWindow = nil
+        if teleport { stopTravel(); panel.setFrameOrigin(wanderHome); wandering = false; js("desk.face(1)"); js("desk.unhold('hop')"); placeBubble(); return }
+        let here = panel.frame.origin, down = NSPoint(x: here.x, y: wanderHome.y)
+        var legs: [(from: NSPoint, to: NSPoint, secs: Double, jump: Bool)] = []
+        if abs(here.y - down.y) > 4 { legs.append((here, down, 0.7, true)) }
+        let walk = abs(down.x - wanderHome.x)
+        if walk > 4 { legs.append((down, wanderHome, max(0.6, Double(walk) / 220), false)) }
+        js("desk.hold('hop', 60000)")
+        travel(legs) { [weak self] in
+            guard let self = self else { return }
+            self.wandering = false; self.js("desk.face(1)"); self.js("desk.unhold('hop')"); self.placeBubble()
+        }
+    }
+
+    /// Move his window along the legs at 60 frames a second: a straight hop for walking, an arc for a jump.
+    func travel(_ legs: [(from: NSPoint, to: NSPoint, secs: Double, jump: Bool)], done: @escaping () -> Void) {
+        stopTravel()
+        wanderLegs = legs; legStart = Date().timeIntervalSince1970
+        guard !legs.isEmpty else { done(); return }
+        js("desk.face(\(legs[0].to.x < legs[0].from.x ? -1 : 1))")
+        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] tm in
+            guard let self = self, let leg = self.wanderLegs.first else { tm.invalidate(); return }
+            let u = min(1, (Date().timeIntervalSince1970 - self.legStart) / leg.secs)
+            var p = NSPoint(x: leg.from.x + (leg.to.x - leg.from.x) * u, y: leg.from.y + (leg.to.y - leg.from.y) * u)
+            if leg.jump { p.y += CGFloat(sin(Double.pi * u)) * max(40, abs(leg.to.y - leg.from.y) * 0.35) }
+            self.panel.setFrameOrigin(p)
+            if u >= 1 {
+                self.wanderLegs.removeFirst(); self.legStart = Date().timeIntervalSince1970
+                if let next = self.wanderLegs.first { self.js("desk.face(\(next.to.x < next.from.x ? -1 : 1))") }
+                else { tm.invalidate(); self.wanderTick = nil; done() }
+            }
+        }
+        wanderTick = t
+        RunLoop.main.add(t, forMode: .common)
+    }
+    func stopTravel() { wanderTick?.invalidate(); wanderTick = nil; wanderLegs = [] }
+
+    /// Twice a second while he's perched: time to go home, or did his window move?
+    func checkPerch() {
+        guard wandering, wanderTick == nil, let pw = perchWindow else { return }
+        if Date().timeIntervalSince1970 >= perchUntil || keepingQuiet || (bubble?.isVisible ?? false) && bubbleMode == "chat" { wanderHomeNow(); return }
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(pw.id)) as? [[String: Any]] ?? []
+        var r = CGRect.zero
+        if let b = list.first?[kCGWindowBounds as String] as? NSDictionary { _ = CGRectMakeWithDictionaryRepresentation(b, &r) }
+        let onScreen = list.first?[kCGWindowIsOnscreen as String] as? Bool ?? false
+        if !onScreen || abs(r.minX - pw.frame.minX) > 2 || abs(r.minY - pw.frame.minY) > 2 || abs(r.width - pw.frame.width) > 2 { wanderHomeNow() }
+    }
+    @objc func toggleWander() {
+        wanderOn.toggle()
+        if !wanderOn { wanderHomeNow() }
+        say(wanderOn ? "Every so often I'll hop over and sit on the window you're in. Drag me anywhere to change where home is." : "I'll stay in my corner.")
+    }
+
     // MARK: screen sharing
 
     /// While you share your screen (Zoom, Teams, Webex, Slack, FaceTime, or Meet in a browser) or present full
@@ -2954,6 +3081,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             shareClearSince = 0
             guard !hiddenForShare else { return }
             hiddenForShare = true
+            wanderHomeNow(teleport: true)
             panel.orderOut(nil)
             if bubble?.isVisible == true { heldBubble = bubbleMode != "none"; bubble.orderOut(nil) }
         } else if hiddenForShare {
@@ -3443,7 +3571,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     }
 
     func showBubble(key: Bool) {
-        if keepingQuiet && !key { heldBubble = true; return }      // sharing or in a meeting: it waits (you opening it doesn't)
+        if keepingQuiet && !key { heldBubble = true; return }
+        if key && wandering { wanderHomeNow(teleport: true) }      // you want him: he's back in his corner      // sharing or in a meeting: it waits (you opening it doesn't)
         bubbleJS("bubble.shown()")
         placeBubble()
         if key { bubble.makeKeyAndOrderFront(nil); bubble.makeFirstResponder(bubbleWeb) } else { bubble.orderFrontRegardless() }

@@ -6,8 +6,8 @@
   const F = window.__foxDraw, R = window.__foxRig;
   const { CREAM, INK, DARK, stroke, dot, trace, wob, part, oval } = F;
 
-  const MOMENTS = ['idle', 'working', 'alert', 'done', 'waiting', 'longhaul', 'night', 'meeting', 'awake', 'letter', 'flag', 'boombox'];
-  const BASE = { idle: 'idle', working: 'working', alert: 'alert', done: 'done', waiting: 'alert', longhaul: 'working', night: 'idle', meeting: 'meeting', awake: 'awake', letter: 'letter', flag: 'done', boombox: 'done' };
+  const MOMENTS = ['idle', 'working', 'alert', 'done', 'waiting', 'longhaul', 'night', 'meeting', 'awake', 'letter', 'flag', 'boombox', 'hop'];
+  const BASE = { idle: 'idle', working: 'working', alert: 'alert', done: 'done', waiting: 'alert', longhaul: 'working', night: 'idle', meeting: 'meeting', awake: 'awake', letter: 'letter', flag: 'done', boombox: 'done', hop: 'awake' };
   const GAGS = ['pounce', 'tailchase', 'sneeze', 'howl', 'zoomies', 'hiccup', 'leaf', 'boop', 'yawn', 'peekaboo', 'disco', 'floss', 'dab', 'dubstep'];
 
   const D = {}, LOOPS = {}, TRANS = {}, CLIPS = {};
@@ -140,6 +140,14 @@
     flag: () => Array.from({ length: 6 }, (_, i) => [mix(AWAKE, { eyes: 'happy', mouth: i % 3 === 1 ? 'smile' : 'open', blush: true, x: -34,
       armR: i % 2 ? [176, 88] : [168, 94], armL: i % 2 ? [92, 104] : [96, 112], prop: 'flag', sway: i % 2 ? 0.1 : -0.1,
       y: i % 3 === 0 ? -4 : 0, squash: i % 3 === 2 ? 0.04 : 0, tail: 0.3 + wave(i, 6, 0.15), fx: 'none' }), 4]),
+    // hop: on his way somewhere (Fox Buddy moves his window; the page faces him the way he's going). A bouncy
+    // chibi hop: crouch, spring up stretched, land squashed; leaning into it, tail flying, paws out for balance.
+    hop: () => [
+      [mix(AWAKE, { eyes: 'happy', mouth: 'smile', lean: 0.1, squash: 0.12, y: 0, armL: [100, 150], armR: [158, 146], tail: 0.1, earL: 0.1, earR: 0.1, fx: 'none' }), 2],
+      [mix(AWAKE, { eyes: 'dot', look: [3, 0], mouth: 'open', lean: 0.16, squash: -0.1, y: -12, armL: [88, 128], armR: [172, 122], tail: 0.45, earL: -0.15, earR: -0.15, fx: 'none' }), 2],
+      [mix(AWAKE, { eyes: 'dot', look: [3, 0], mouth: 'open', lean: 0.14, squash: -0.06, y: -16, armL: [86, 124], armR: [174, 120], tail: 0.5, earL: -0.2, earR: -0.2, fx: 'none' }), 2],
+      [mix(AWAKE, { eyes: 'happy', mouth: 'smile', lean: 0.1, squash: 0.08, y: -4, armL: [96, 140], armR: [162, 136], tail: 0.3, earL: 0.15, earR: 0.15, fx: 'none' }), 2],
+    ],
     // boombox: music's playing. He holds a stereo up over his head and bobs along, notes drifting off it.
     boombox: () => Array.from({ length: 8 }, (_, i) => [mix(AWAKE, { eyes: i % 4 === 3 ? 'happy' : 'closed', mouth: i % 2 ? 'smile' : 'w',
       armL: [80, 66 + (i % 2) * 3], armR: [176, 66 + (i % 2) * 3], prop: 'boombox', hy: i % 2 ? 2 : -1, y: i % 2 ? 0 : -2,

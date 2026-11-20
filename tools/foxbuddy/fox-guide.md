@@ -339,6 +339,16 @@ Right-click › Just for Fun:
   birthday, the first time the user is at the Mac after 8 AM, he celebrates and says whose birthday it
   is. Contacts never leave the Mac.
 
+## Wandering
+
+Every so often, when he has nothing going on and the user is at the Mac, he hops over to the window they're
+working in, jumps up and sits on its top edge for a minute or two, then hops back to his corner. About every
+25 to 45 minutes when Liveliness is Calm, every 8 to 15 when Lively; only between 8 AM and 10 PM. He only
+goes if that window is on his screen, wide enough, not full screen, and has room above it. He comes straight
+home if the window moves or closes, a share or meeting starts, or the user opens his chat; dragging him
+anywhere makes that spot his new home. Right-click › Wander Around: Wander Around Now and Then (on by
+default) and Go Sit on My Window (right now).
+
 ## Liveliness
 
 Right-click › Liveliness: Calm (the default) or Lively. Calm keeps him lively without constant switching:

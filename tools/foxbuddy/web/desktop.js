@@ -292,7 +292,7 @@
   let look = 'float';                 // float: no background, light line, a dark halo so he reads on any wallpaper
                                       // ink: no background, dark line (like a cartoon on paper)
                                       // glass: on his own dark rounded tile
-  let tintNow = [...TANGERINE], goal = [...TANGERINE];
+  let tintNow = [...TANGERINE], goal = [...TANGERINE], facing = 1;
   const hex = rgb => '#' + rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
   const canvas = document.createElement('canvas');
   canvas.id = 'desk';
@@ -404,7 +404,8 @@
   function hit(x, y) {
     if (look === 'glass') return true;
     const r = canvas.getBoundingClientRect(), dpr = canvas.width / r.width, pad = Math.round(6 * dpr);
-    const px = Math.round((x - r.left) * dpr), py = Math.round((y - r.top) * dpr);
+    let px = Math.round((x - r.left) * dpr), py = Math.round((y - r.top) * dpr);
+    if (facing < 0) px = canvas.width - px;            // the drawing is mirrored on screen, not in its pixels
     if (px < -pad || py < -pad || px > canvas.width + pad || py > canvas.height + pad) return false;
     const x0 = Math.max(0, px - pad), y0 = Math.max(0, py - pad), w = Math.min(canvas.width, px + pad) - x0, h = Math.min(canvas.height, py + pad) - y0;
     if (w <= 0 || h <= 0) return false;
@@ -416,6 +417,7 @@
   window.desk = {
     line, tap, wake, watch, follow, hold, setLook, said, hit, act: setAct, present: setPresent,
     play: n => playEvent(String(n)),
+    face: d => { facing = d < 0 ? -1 : 1; canvas.style.transform = facing < 0 ? 'translateX(-50%) scaleX(-1)' : ''; },   // which way he's walking (keeps start.js's centring)
     setCalm: on => { calm = !!on; if (!calm) { queued = null; clearTimeout(queueTimer); } },
     unhold: m => { if (holdMood === m) { holdUntil = 0; want(asked); } },   // end a hold, if it's still that one (music stopped)          // one of his clips by name (stretch: the version for whatever mood he's in)
     clips: () => Object.keys(L.CLIPS).filter(n => !n.startsWith('tap_') && eventIndex(n)).sort(),
