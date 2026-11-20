@@ -1225,7 +1225,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         // The morning check-in: looked at once a minute.
         let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.checkBrief(); self?.checkForUpdate(); self?.checkEmailAlerts()
-            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips()
+            self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips(); self?.checkSites()
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
@@ -1558,6 +1558,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Meetings", meetingItems()))
         m.addItem(sub("Stretch Breaks", moveItems()))
         m.addItem(sub("Ship Watcher", shipItems()))
+        m.addItem(sub("Site Checks", siteItems()))
         m.addItem(item("Look at My Screen", #selector(lookAtScreen)))
         m.addItem(.separator())
         m.addItem(item("Tap", #selector(tapNow)))
@@ -2116,6 +2117,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Speech Bubble: \(talk); Recap Long Claude Code Jobs: \(on(recaps))",
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
+            "Site Checks: \(watchSites.isEmpty ? "no sites" : watchSites.compactMap { URL(string: $0)?.host }.joined(separator: ", "))",
             "Ship Watcher: \(shipRepos.isEmpty ? "not watching any repositories" : "watching " + shipRepos.joined(separator: ", "))",
             "Stretch breaks: \(moveEvery == 0 ? "off" : "after \(moveEvery) minutes without a break")",
             "Quiet During Meetings: \(on(quietInMeetings))\(inMeetingNow() ? " (in a meeting right now)" : "")",
@@ -2459,6 +2461,98 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         shipRepos.removeAll { $0 == r }
         var all = prefs.dictionary(forKey: "shipState") ?? [:]; all[r] = nil; prefs.set(all, forKey: "shipState")
         say("Stopped watching \(r).")
+    }
+
+    // MARK: site checks
+
+    /// Websites you want watched: every 5 minutes he loads each one. Two failed checks in a row (an error, or
+    /// a 4xx/5xx answer) and he waves with "<site> is down"; when it answers again, "back up after N minutes".
+    /// Right-click › Site Checks. State in UserDefaults "siteState": {url: {"fails": n, "downSince": t}}.
+    var watchSites: [String] {
+        get { prefs.stringArray(forKey: "watchSites") ?? [] }
+        set { prefs.set(newValue, forKey: "watchSites") }
+    }
+    var sitesCheckedAt = 0.0
+
+    func checkSites(force: Bool = false) {
+        let now = Date().timeIntervalSince1970
+        guard !watchSites.isEmpty, ready, force || now - sitesCheckedAt >= 290 else { return }
+        sitesCheckedAt = now
+        for site in watchSites {
+            guard let url = URL(string: site) else { continue }
+            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+            req.setValue("FoxBuddy/\(App.version) (site check)", forHTTPHeaderField: "User-Agent")
+            URLSession.shared.dataTask(with: req) { [weak self] _, resp, err in
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                let why = err.map { ($0 as NSError).localizedDescription } ?? (code >= 400 ? "it answered \(code)" : "")
+                DispatchQueue.main.async { self?.siteResult(site, ok: err == nil && code > 0 && code < 400, why: why) }
+            }.resume()
+        }
+    }
+
+    func siteResult(_ site: String, ok: Bool, why: String) {
+        var all = prefs.dictionary(forKey: "siteState") as? [String: [String: Any]] ?? [:]
+        var st = all[site] ?? [:]
+        let host = URL(string: site)?.host ?? site, now = Date().timeIntervalSince1970
+        let fails = (st["fails"] as? Int) ?? 0, downSince = st["downSince"] as? Double
+        if ok {
+            if let d = downSince {
+                let mins = max(1, Int((now - d) / 60))
+                bubbleJump = ["url": site]; bubbleKind = "info"; bubbleMode = "say"
+                bubbleJS("bubble.show(\(jsonLiteral(["text": "**\(host)** is back up, after about \(mins) minute\(mins == 1 ? "" : "s").", "kind": "info", "jump": true, "jumpLabel": "Open it"] as [String: Any])))")
+                showBubble(key: false)
+            }
+            st = [:]
+        } else {
+            st["fails"] = fails + 1
+            if fails + 1 == 2 && downSince == nil {
+                st["downSince"] = now - 300
+                js("desk.hold('alert', 30000)")
+                bubbleJump = ["url": site]; bubbleKind = "needs"; bubbleMode = "say"
+                bubbleJS("bubble.show(\(jsonLiteral(["text": "**\(host)** looks down: \(why.isEmpty ? "no answer" : why). I'll tell you when it's back.", "kind": "needs", "jump": true, "jumpLabel": "Open it"] as [String: Any])))")
+                showBubble(key: false)
+            }
+        }
+        all[site] = st.isEmpty ? nil : st
+        prefs.set(all, forKey: "siteState")
+    }
+
+    func siteItems() -> [NSMenuItem] {
+        var items = [item("Watch a Website…", #selector(addSite)), item("Check Now", #selector(checkSitesNow))]
+        if !watchSites.isEmpty { items.append(.separator()) }
+        let down = prefs.dictionary(forKey: "siteState") as? [String: [String: Any]] ?? [:]
+        items += watchSites.map { s in
+            item("Stop Watching \(URL(string: s)?.host ?? s)\(down[s]?["downSince"] != nil ? " (down)" : "")", #selector(removeSite(_:)), rep: s)
+        }
+        return items
+    }
+    @objc func checkSitesNow() {
+        if watchSites.isEmpty { addSite(); return }
+        checkSites(force: true); say("Checking \(watchSites.count == 1 ? "it" : "them")…")
+    }
+    @objc func addSite() {
+        let a = NSAlert()
+        a.messageText = "Which website should I keep an eye on?"
+        a.informativeText = "Its address, like example.com. I'll load it every 5 minutes, and wave if it stops answering."
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24)); f.placeholderString = "example.com"
+        a.accessoryView = f; a.addButton(withTitle: "Watch"); a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        a.window.initialFirstResponder = f
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        var s = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !s.lowercased().hasPrefix("http") { s = "https://" + s }
+        guard let u = URL(string: s), let host = u.host, host.contains("."), ["http", "https"].contains(u.scheme ?? "") else {
+            say("That doesn't look like a web address. Try again from Site Checks in my menu."); return
+        }
+        if !watchSites.contains(s) { watchSites.append(s) }
+        say("Watching \(host). I'll wave if it goes down.")
+        checkSites(force: true)
+    }
+    @objc func removeSite(_ s: NSMenuItem) {
+        guard let site = s.representedObject as? String else { return }
+        watchSites.removeAll { $0 == site }
+        var all = prefs.dictionary(forKey: "siteState") ?? [:]; all[site] = nil; prefs.set(all, forKey: "siteState")
+        say("Stopped watching \(URL(string: site)?.host ?? site).")
     }
 
     // MARK: screen sharing

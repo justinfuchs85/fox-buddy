@@ -227,6 +227,14 @@ release published on its own counts too. He checks every 5 minutes (every 2 whil
 GitHub's public API without signing in, so private repositories don't work. Check Now looks right away;
 Stop Watching removes one.
 
+## Site Checks
+
+He can keep an eye on websites: right-click › Site Checks › Watch a Website… (an address like example.com).
+Every 5 minutes he loads each one. After two failed checks in a row (no answer, or an error like 404 or
+503) he waves and says it looks down, with Open it; when it answers again he says it's back up and how
+long it was down. Check Now checks right away; Stop Watching removes one (the menu marks sites that are
+down). Checks only happen while the Mac is awake.
+
 ## Stretch breaks
 
 After 90 minutes of nonstop keyboard and mouse, he does a big stretch and suggests a break (a quick lap).
