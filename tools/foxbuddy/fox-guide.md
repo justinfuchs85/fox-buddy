@@ -322,6 +322,19 @@ Alerts lists the alerts (Remove "…"), Add an Alert…, Check Now, and how ofte
   Teams's red border. If he misses a share in some app, Right-click › Hide works any time.
 - Right-click › Hide hides him; opening Fox Buddy again brings him back. Right-click › Quit Fox Buddy.
 
+## Just for fun
+
+Right-click › Just for Fun:
+
+- Jam Along to Music (on by default): while Apple Music or Spotify is playing and he has nothing else going
+  on, he holds a boombox up over his head and bobs along, with notes drifting off it. He hears play and
+  pause from the apps' own announcements to the Mac, so it needs no permission (music in a browser doesn't count).
+- Friday at 5 Celebration (on by default): on Friday between 5 and 7 PM, the first time the user is at the
+  Mac, he dances and says something about the weekend. Once a week; never during a meeting or a share.
+- Birthdays from Contacts (off until turned on; macOS asks for Contacts access then): on someone's
+  birthday, the first time the user is at the Mac after 8 AM, he celebrates and says whose birthday it
+  is. Contacts never leave the Mac.
+
 ## Privacy: where things go
 
 - To Anthropic, through Claude Code, under the user's own Claude account: chats, and whatever he looks

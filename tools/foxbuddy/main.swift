@@ -14,6 +14,7 @@
 
 import Carbon.HIToolbox
 import Cocoa
+import Contacts
 import Network
 import ServiceManagement
 import WebKit
@@ -1226,6 +1227,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let briefTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.checkBrief(); self?.checkForUpdate(); self?.checkEmailAlerts()
             self?.checkMeetings(); self?.checkWrap(); self?.checkMovement(); self?.checkShips(); self?.checkSites(); self?.checkHousekeeping(); self?.checkFocus()
+            self?.checkFriday(); self?.checkBirthdays(); self?.jam()
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
@@ -1348,6 +1350,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             self.makeBubble()
             if self.hotKeyID != "off" { self.setUpHotKey() }
             self.setUpCaptureKey()
+            self.listenForMusic()
         }
         clampOnScreen()
         panel.orderFrontRegardless()
@@ -1557,6 +1560,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Email Alerts", emailAlertItems()))
         m.addItem(sub("Meetings", meetingItems()))
         m.addItem(sub("Focus Timer", focusItems()))
+        m.addItem(sub("Just for Fun", funItems()))
         m.addItem(sub("Stretch Breaks", moveItems()))
         m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(sub("Site Checks", siteItems()))
@@ -2120,6 +2124,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
             "Mac Housekeeping: \(on(housekeeping))",
+            "Just for Fun: Jam Along to Music \(on(jamAlong)), Friday at 5 Celebration \(on(celebrations)), Birthdays from Contacts \(on(birthdays))",
             "Focus Timer: sessions of \(focusMinutes) minutes\(focusing ? ", one going now" : ""); \(focusToday().0) finished today",
             "Site Checks: \(watchSites.isEmpty ? "no sites" : watchSites.compactMap { URL(string: $0)?.host }.joined(separator: ", "))",
             "Ship Watcher: \(shipRepos.isEmpty ? "not watching any repositories" : "watching " + shipRepos.joined(separator: ", "))",
@@ -2758,6 +2763,103 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     @objc func pickFocusMinutes(_ s: NSMenuItem) {
         guard let m = s.representedObject as? Int else { return }
         focusMinutes = m; say("Focus sessions are \(m) minutes now.")
+    }
+
+    // MARK: just for fun
+
+    /// Music: Apple Music and Spotify announce play and pause to the whole Mac (no permission needed). While
+    /// something's playing and he has nothing else to do, he holds a boombox over his head and bobs along.
+    var musicPlaying = false
+    var jamAlong: Bool {
+        get { prefs.object(forKey: "jamAlong") as? Bool ?? true }
+        set { prefs.set(newValue, forKey: "jamAlong") }
+    }
+    func listenForMusic() {
+        let dn = DistributedNotificationCenter.default()
+        for name in ["com.apple.Music.playerInfo", "com.apple.iTunes.playerInfo", "com.spotify.client.PlaybackStateChanged"] {
+            dn.addObserver(forName: Notification.Name(name), object: nil, queue: .main) { [weak self] n in
+                let state = n.userInfo?["Player State"] as? String ?? ""
+                self?.musicPlaying = state == "Playing"
+                self?.jam()
+            }
+        }
+    }
+    func jam() {
+        if musicPlaying && jamAlong && !focusing { js("desk.hold('boombox', 600000)") } else { js("desk.unhold('boombox')") }
+    }
+    @objc func toggleJamAlong() {
+        jamAlong.toggle(); jam()
+        say(jamAlong ? "When Music or Spotify plays, I'll get the boombox out." : "No more boombox.")
+    }
+
+    /// Friday at 5 PM (the first time you're at the Mac between 5 and 7), a little celebration. Once a week.
+    var celebrations: Bool {
+        get { prefs.object(forKey: "celebrations") as? Bool ?? true }
+        set { prefs.set(newValue, forKey: "celebrations") }
+    }
+    func checkFriday() {
+        let now = Date(), cal = Calendar.current
+        guard celebrations, ready, bubble != nil, !hiddenByUser, !keepingQuiet, App.idleSeconds() < 120,
+              cal.component(.weekday, from: now) == 6, (17..<19).contains(cal.component(.hour, from: now)) else { return }
+        let week = "\(cal.component(.yearForWeekOfYear, from: now))-\(cal.component(.weekOfYear, from: now))"
+        guard prefs.string(forKey: "lastFriday") != week else { return }
+        prefs.set(week, forKey: "lastFriday")
+        js("desk.play('tap_disco')")
+        say(["It's Friday at 5. Weekend mode: engaged.", "Five o'clock on a Friday. You made it.", "Friday, 5 PM. Close the laptop with confidence."].randomElement()!)
+    }
+
+    /// Birthdays from your Contacts (opt-in: macOS asks first), the first time you're at the Mac on the day.
+    var birthdays: Bool {
+        get { prefs.bool(forKey: "birthdays") }
+        set { prefs.set(newValue, forKey: "birthdays") }
+    }
+    func checkBirthdays() {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        let today = f.string(from: Date())
+        guard birthdays, ready, bubble != nil, !hiddenByUser, !keepingQuiet, App.idleSeconds() < 120,
+              Calendar.current.component(.hour, from: Date()) >= 8, prefs.string(forKey: "lastBirthdays") != today,
+              CNContactStore.authorizationStatus(for: .contacts) == .authorized else { return }
+        prefs.set(today, forKey: "lastBirthdays")
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let names = App.birthdaysToday()
+            DispatchQueue.main.async {
+                guard let self = self, !names.isEmpty else { return }
+                let list = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
+                self.js("desk.hold('done', 15000)")
+                self.say("It's \(list)'s birthday today.")
+            }
+        }
+    }
+    static func birthdaysToday() -> [String] {
+        let store = CNContactStore(), cal = Calendar.current, now = Date()
+        let keys = [CNContactGivenNameKey, CNContactFamilyNameKey, CNContactBirthdayKey, CNContactNicknameKey] as [CNKeyDescriptor]
+        var out: [String] = []
+        try? store.enumerateContacts(with: CNContactFetchRequest(keysToFetch: keys)) { c, _ in
+            guard let b = c.birthday, b.month == cal.component(.month, from: now), b.day == cal.component(.day, from: now) else { return }
+            let name = [c.givenName, c.familyName].filter { !$0.isEmpty }.joined(separator: " ")
+            if !name.isEmpty { out.append(name) }
+        }
+        return Array(out.prefix(5))
+    }
+    @objc func toggleBirthdays() {
+        if birthdays { birthdays = false; say("I'll stop mentioning birthdays."); return }
+        CNContactStore().requestAccess(for: .contacts) { [weak self] ok, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.birthdays = ok
+                self.say(ok ? "I'll mention birthdays from your Contacts on the day. They stay on your Mac." :
+                    "macOS didn't let me see Contacts. You can allow it in System Settings › Privacy & Security › Contacts › Fox Buddy.")
+            }
+        }
+    }
+    func funItems() -> [NSMenuItem] {
+        [item("Jam Along to Music", #selector(toggleJamAlong), on: jamAlong),
+         item("Friday at 5 Celebration", #selector(toggleCelebrations), on: celebrations),
+         item("Birthdays from Contacts", #selector(toggleBirthdays), on: birthdays)]
+    }
+    @objc func toggleCelebrations() {
+        celebrations.toggle()
+        say(celebrations ? "Friday at 5, we celebrate." : "No Friday celebrations. Very professional.")
     }
 
     // MARK: screen sharing

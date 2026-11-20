@@ -95,6 +95,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   </dict></array>
   <key>NSAppSleepDisabled</key><true/>
   <key>NSHumanReadableCopyright</key><string>MIT License. Grew out of desk-buddy, by Joe Bentham.</string>
+  <key>NSContactsUsageDescription</key><string>Only if you turn on Birthdays from Contacts: so he can mention a birthday on the day. Nothing leaves your Mac.</string>
   <key>NSAppleEventsUsageDescription</key><string>So he can read your Reminders and Notes, and (only after you approve each one) add a reminder, make a note or run a shortcut.</string>
 $SPARKLE_PLIST
 </dict></plist>
@@ -110,12 +111,13 @@ if [ -n "${SIGN_IDENTITY:-}" ]; then
     codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$SPK/Versions/B/Updater.app"
     codesign --force --options runtime "$TS" --sign "$SIGN_IDENTITY" "$SPK"
   fi
-  # with the hardened runtime, sending Apple events (Reminders, Notes) needs this entitlement
+  # with the hardened runtime, sending Apple events (Reminders, Notes) and reading Contacts (birthdays) need these entitlements
   ENT="$BUILD/foxbuddy.entitlements"
   cat > "$ENT" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>com.apple.security.automation.apple-events</key><true/></dict></plist>
+<plist version="1.0"><dict><key>com.apple.security.automation.apple-events</key><true/>
+<key>com.apple.security.personal-information.addressbook</key><true/></dict></plist>
 PLIST
   codesign --force --options runtime "$TS" --entitlements "$ENT" --sign "$SIGN_IDENTITY" "$APP"
   codesign --verify --strict --deep --verbose=2 "$APP"

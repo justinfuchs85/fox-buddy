@@ -6,8 +6,8 @@
   const F = window.__foxDraw, R = window.__foxRig;
   const { CREAM, INK, DARK, stroke, dot, trace, wob, part, oval } = F;
 
-  const MOMENTS = ['idle', 'working', 'alert', 'done', 'waiting', 'longhaul', 'night', 'meeting', 'awake', 'letter', 'flag'];
-  const BASE = { idle: 'idle', working: 'working', alert: 'alert', done: 'done', waiting: 'alert', longhaul: 'working', night: 'idle', meeting: 'meeting', awake: 'awake', letter: 'letter', flag: 'done' };
+  const MOMENTS = ['idle', 'working', 'alert', 'done', 'waiting', 'longhaul', 'night', 'meeting', 'awake', 'letter', 'flag', 'boombox'];
+  const BASE = { idle: 'idle', working: 'working', alert: 'alert', done: 'done', waiting: 'alert', longhaul: 'working', night: 'idle', meeting: 'meeting', awake: 'awake', letter: 'letter', flag: 'done', boombox: 'done' };
   const GAGS = ['pounce', 'tailchase', 'sneeze', 'howl', 'zoomies', 'hiccup', 'leaf', 'boop', 'yawn', 'peekaboo', 'disco', 'floss', 'dab', 'dubstep'];
 
   const D = {}, LOOPS = {}, TRANS = {}, CLIPS = {};
@@ -140,6 +140,10 @@
     flag: () => Array.from({ length: 6 }, (_, i) => [mix(AWAKE, { eyes: 'happy', mouth: i % 3 === 1 ? 'smile' : 'open', blush: true, x: -34,
       armR: i % 2 ? [176, 88] : [168, 94], armL: i % 2 ? [92, 104] : [96, 112], prop: 'flag', sway: i % 2 ? 0.1 : -0.1,
       y: i % 3 === 0 ? -4 : 0, squash: i % 3 === 2 ? 0.04 : 0, tail: 0.3 + wave(i, 6, 0.15), fx: 'none' }), 4]),
+    // boombox: music's playing. He holds a stereo up over his head and bobs along, notes drifting off it.
+    boombox: () => Array.from({ length: 8 }, (_, i) => [mix(AWAKE, { eyes: i % 4 === 3 ? 'happy' : 'closed', mouth: i % 2 ? 'smile' : 'w',
+      armL: [80, 66 + (i % 2) * 3], armR: [176, 66 + (i % 2) * 3], prop: 'boombox', hy: i % 2 ? 2 : -1, y: i % 2 ? 0 : -2,
+      squash: i % 2 ? 0.04 : -0.02, earL: 0.35, earR: 0.35, tilt: wave(i, 8, 0.05), tail: 0.25 + wave(i, 8, 0.2), fx: 'notes' }), 4]),
     letter: () => Array.from({ length: 6 }, (_, i) => [mix(AWAKE, { eyes: 'happy', mouth: 'smile', armL: [104, 172 - (i % 2) * 3], armR: [152, 172 - (i % 2) * 3], prop: 'letter', y: i % 3 === 0 ? -3 : 0, tail: 0.2 + wave(i, 6, 0.2), fx: 'none' }), 4]),
   };
   const firstPose = {};
@@ -451,6 +455,22 @@
       const mid = edge[Math.round(n / 2)];
       text(c, "It's live!", mid[0], mid[1] + h / 2 + 1, 12, sway * 0.6, CREAM);
       dot(c, top[0], top[1] - 1, 3.6, '#FFD23F');                    // the knob on top
+    },
+    boombox(c, P, a, seed, tick) {                      // a big old stereo, held up over his head with both paws
+      const x = 128 + (P.x || 0), y = Math.min(P.armL ? P.armL[1] : 56, P.armR ? P.armR[1] : 56) - 14 + (P.y || 0);
+      const w = 118, h = 42, L = x - w / 2, T = y - h / 2;
+      stroke(c, [[L + 22, T + 1], [L + 26, T - 9], [L + w - 26, T - 9], [L + w - 22, T + 1]], seed + 960, 3.4);            // handle
+      part(c, [[L, T, 1], [L + w, T, 1], [L + w, T + h, 1], [L, T + h, 1]], '#5B6170', seed + 961, { width: 3.6, wobble: 0.4 });
+      const beat = (tick >> 2) % 2;                                                       // the cones thump
+      for (const s of [-1, 1]) {
+        const cx = x + s * 36, cy = T + h / 2 + 1;
+        part(c, oval(cx, cy, 14 + beat, 14 + beat, 14), '#2E323C', seed + 962 + s, { width: 2.6, wobble: 0.3 });
+        part(c, oval(cx, cy, 6, 6, 10), '#8A909E', seed + 964 + s, { width: 2, wobble: 0.2 });
+        dot(c, cx, cy, 2.2, ink());
+      }
+      part(c, [[x - 13, T + 8], [x + 13, T + 8], [x + 13, T + 22], [x - 13, T + 22]], '#C8CDD8', seed + 966, { width: 2.2, wobble: 0.2 });   // the tape
+      for (const s of [-1, 1]) dot(c, x + s * 6, T + 15, 2.6, '#5B6170');
+      for (let k = 0; k < 4; k++) dot(c, x - 9 + k * 6, T + h - 7, 1.8, k === 1 ? '#E8454B' : CREAM);               // buttons
     },
     moon(c, P, a, seed) {
       c.save(); c.beginPath(); c.arc(48, 46, 18, 0, Math.PI * 2); c.fillStyle = '#FFE9A8'; c.fill();
