@@ -302,13 +302,13 @@
       const age = (now - e.from) / 1000;
       if (k === 'parcel') out.parcel = Math.min(1, age / 1.6);
       else if (k === 'flash') out.flash = Math.max(0, 1 - age / 0.5);
-      else { out[k] = e.value; if (k === 'swatch') out.swatchAge = age; }
+      else { out[k] = e.value; if (k === 'swatch') out.swatchAge = age; if (k === 'phone') out.phoneAge = age; }
     }
     return out;
   }
   function extrasKey(now) {
     const ks = Object.keys(extras); if (!ks.length) return '';
-    const moving = ks.some(k => k === 'parcel' || k === 'flash' || (k === 'swatch' && now - extras[k].from < 400));
+    const moving = ks.some(k => k === 'parcel' || k === 'flash' || (k === 'swatch' && now - extras[k].from < 400) || (k === 'phone' && now - extras[k].from < 1700));
     return ks.map(k => k + ':' + extras[k].value).join(',') + (moving ? '|' + Math.floor(now / 33) : '');
   }
 

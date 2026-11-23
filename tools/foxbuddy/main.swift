@@ -1471,7 +1471,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         RunLoop.main.add(sharing, forMode: .common)
         let perch = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkPerch() }
         RunLoop.main.add(perch, forMode: .common)
-        let touches = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.checkFiles(); self?.checkClipboard(); self?.checkWelcome() }
+        let touches = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.checkFiles(); self?.checkClipboard(); self?.checkWelcome(); self?.checkMessages() }
         RunLoop.main.add(touches, forMode: .common)
         RunLoop.main.add(presence, forMode: .common)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.checkPresence() }
@@ -1813,6 +1813,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Keep the Mac Awake", awakeItems()))
         if !fox {
         m.addItem(sub("Email Alerts", emailAlertItems()))
+        }
+        m.addItem(sub("Message Alerts", messageItems()))
+        if !fox {
         m.addItem(sub("Meetings", meetingItems()))
         }
         m.addItem(sub("Focus Timer", focusItems()))
@@ -2394,6 +2397,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
             "Morning check-in: \(briefDays == "off" ? "off" : (briefDays == "daily" ? "every day" : "weekdays") + " from \(briefHour):00 AM")",
             "Join button before meetings: \(on(joinButton))",
             "Count Down to Meetings (colour change): \(on(meetingCountdown))",
+            "Message Alerts: \(messagesOn ? "on" : "off") (a Shortcuts automation writes senders to Fox Buddy Messages.txt)",
             "Keep the Mac Awake: \(awakeUntil.map { $0 == .distantFuture ? "on, until stopped" : "on, until \($0)" } ?? "off")",
             "Little Touches: " + [("downloads", "Catch My Downloads"), ("screenshots", "Screenshot Helper"), ("welcome", "Welcome Me Back"), ("clipboard", "React to What I Copy"), ("pounce", "Pounce at My Pointer"), ("lantern", "Lantern in Dark Mode")].map { "\($0.1) \(on(touch($0.0)))" }.joined(separator: ", "),
             "Countdowns: \(countdowns.isEmpty ? "none" : countdowns.map { "\($0[0]) on \($0[1])" }.joined(separator: ", "))",
@@ -3572,6 +3576,98 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         showBubble(key: false)
     }
 
+    // MARK: message alerts (fed by a Shortcuts automation)
+
+    /// macOS 26's Shortcuts can run an automation when a message arrives. Ours adds one line, who it's from, to
+    /// a text file; he watches that file and shows who messaged. He never sees message text, and needs no Full
+    /// Disk Access. Off until turned on (looking in iCloud Drive makes macOS ask).
+    var messagesOn: Bool { prefs.bool(forKey: "messagesOn") }
+    var messageOffsets: [String: UInt64] = [:], recentSenders: [(name: String, at: Double)] = []
+    static var messageFiles: [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [home.appendingPathComponent("Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/Fox Buddy Messages.txt"),
+                home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/Fox Buddy Messages.txt"),
+                home.appendingPathComponent("Documents/Fox Buddy Messages.txt")]
+    }
+    func checkMessages() {
+        guard messagesOn, ready else { return }
+        var fresh: [String] = []
+        for url in App.messageFiles {
+            guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? UInt64 else { continue }
+            guard let seen = messageOffsets[url.path] else { messageOffsets[url.path] = size; continue }   // first look: old lines don't count
+            if size < seen { messageOffsets[url.path] = size; continue }                                  // the file was cleared
+            guard size > seen, let h = try? FileHandle(forReadingFrom: url) else { continue }
+            defer { try? h.close() }
+            try? h.seek(toOffset: seen)
+            let data = (try? h.read(upToCount: Int(min(size - seen, 64_000)))) ?? Data()
+            guard let text = String(data: data, encoding: .utf8), let lastNewline = text.lastIndex(where: \.isNewline) else { continue }
+            messageOffsets[url.path] = seen + UInt64(text[...lastNewline].utf8.count)                     // whole lines only
+            fresh += text[...lastNewline].split(whereSeparator: \.isNewline).compactMap { App.messageSender(String($0)) }
+        }
+        guard !fresh.isEmpty, !hiddenByUser else { return }
+        let now = Date().timeIntervalSince1970
+        recentSenders = recentSenders.filter { now - $0.at < 120 } + fresh.map { ($0, now) }
+        var names: [String] = []
+        for r in recentSenders where !names.contains(r.name) { names.append(r.name) }
+        let count = recentSenders.count
+        let text = names.count == 1
+            ? (count == 1 ? "Message from **\(names[0])**." : "\(count) messages from **\(names[0])**.")
+            : "\(count) messages: " + names.prefix(3).map { "**\($0)**" }.joined(separator: ", ") + (names.count > 3 ? " and others." : ".")
+        js("desk.extra('phone', true, 9000)")
+        bubbleJump = ["messages": names.count == 1 ? names[0] : ""]; bubbleKind = "info"; bubbleMode = "say"
+        bubbleJS("bubble.show(\(jsonLiteral(["text": text, "kind": "info", "jump": true, "jumpLabel": names.count == 1 ? "Reply" : "Open Messages"] as [String: Any])))")
+        showBubble(key: false)
+    }
+    /// A line from the file: just the sender, or "date | sender", or "date<TAB>sender". Long lines are cut.
+    static func messageSender(_ line: String) -> String? {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return nil }
+        let last = t.components(separatedBy: CharacterSet(charactersIn: "|\t")).last?.trimmingCharacters(in: .whitespaces) ?? t
+        return last.isEmpty ? nil : String(last.prefix(40))
+    }
+    /// The Reply button: that conversation if the sender is a phone number or email, otherwise just Messages.
+    func openMessages(_ who: String) {
+        let addr = who.filter { !" ()-.".contains($0) }
+        let isAddress = (addr.count >= 7 && addr.allSatisfy { $0.isNumber || $0 == "+" }) || who.contains("@")
+        if isAddress, let u = URL(string: "imessage://" + (addr.contains("@") ? who : addr)) { NSWorkspace.shared.open(u); return }
+        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.MobileSMS") {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+    func messageItems() -> [NSMenuItem] {
+        [item("Watch for Messages", #selector(toggleMessages), on: messagesOn),
+         item("How to Set It Up…", #selector(messagesHowTo)),
+         item("Show the Messages File", #selector(showMessagesFile))]
+    }
+    @objc func toggleMessages() {
+        prefs.set(!messagesOn, forKey: "messagesOn"); messageOffsets = [:]
+        if messagesOn {
+            checkMessages()
+            let found = App.messageFiles.contains { FileManager.default.fileExists(atPath: $0.path) }
+            say(found ? "Watching for messages." : "On. I'll start once your Shortcuts automation writes its first line. Message Alerts › How to Set It Up… has the steps.")
+        } else { say("Off.") }
+    }
+    @objc func showMessagesFile() {
+        if let f = App.messageFiles.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            NSWorkspace.shared.activateFileViewerSelecting([f])
+        } else { say("There's no messages file yet. It appears after your automation runs once.") }
+    }
+    @objc func messagesHowTo() {
+        let r = alert("Message alerts with Shortcuts", """
+        Needs macOS 26 (Tahoe) or later. In the Shortcuts app:
+
+        1. Automation (in the sidebar) › New Automation › Message.
+        2. Sender: pick people, or leave it as anyone. Leave Message Contains empty. Choose Run Immediately, and turn off Notify When Run.
+        3. Add the action Append to Text File. For the text, choose Shortcut Input, then click it and pick Sender. For the file, type Fox Buddy Messages.txt (it goes in iCloud Drive › Shortcuts). Make sure Make New Line is on.
+        4. Then right-click me › Message Alerts › Watch for Messages.
+
+        Only the sender's name is written, never the message. Your iPhone can run the same automation, and since the file is in iCloud Drive, I'll see those too. macOS asks once whether I can look in iCloud Drive.
+        """, buttons: ["Open Shortcuts", "OK"])
+        if r == .alertFirstButtonReturn, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.shortcuts") {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
     // MARK: little touches (downloads, screenshots, welcome back, clipboard, countdowns, pounce, lantern)
 
     func touch(_ key: String) -> Bool { prefs.object(forKey: "touch." + key) as? Bool ?? true }
@@ -4657,6 +4753,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         if let m = j["focus"] as? Int { startFocus(minutes: m); return }
         if j["setUp"] as? Bool == true { setUp(); return }
+        if let who = j["messages"] as? String { openMessages(who); return }
         if let path = j["reveal"] as? String { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]); return }
         if let paths = j["fileShots"] as? [String] { fileScreenshots(paths); return }
         if let tel = j["tel"] as? String, tel.allSatisfy({ $0.isNumber || $0 == "+" }), let u = URL(string: "tel:" + tel) { NSWorkspace.shared.open(u); return }

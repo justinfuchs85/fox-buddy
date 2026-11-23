@@ -645,6 +645,15 @@
       text(c, X.swatch.toUpperCase(), 0, 24, 8.5, 0, INK);
       c.restore();
     }
+    if (X.phone) {                                                                                       // a message came in: it buzzes
+      const age = X.phoneAge || 9, pop = Math.min(1, age * 4), buzz = age < 1.6 ? Math.sin(age * 55) * 2.2 : 0;
+      c.save(); c.translate(204 + buzz, 96 - (1 - pop) * 20); c.rotate(0.1); c.globalAlpha = pop;
+      part(c, [[-15, -30, 1], [15, -30, 1], [15, 30, 1], [-15, 30, 1]], DARK, seed + 1050, { width: 3, wobble: 0.15 });
+      part(c, [[-10, -22, 1], [10, -22, 1], [10, 20, 1], [-10, 20, 1]], '#9FD3FF', seed + 1051, { line: false });
+      part(c, oval(-1, -6, 7, 5, 10), '#FFFFFF', seed + 1052, { line: false });                          // a speech bubble on it
+      if (age < 1.6) for (const sx of [-1, 1]) stroke(c, [[sx * 21, -12], [sx * 25, -4], [sx * 21, 4]], seed + 1053 + sx, 2, '#A9A3B8');
+      c.restore();
+    }
     if (X.sign) {
       const w = Math.max(64, Math.min(92, X.sign.length * 6.6 + 18)), x = Math.max(w / 2 + 4, 52), top = 138;
       stroke(c, [[x, top + 30], [x + 1, 200]], seed + 1020, 4, '#8B5A3C');                                  // the stick

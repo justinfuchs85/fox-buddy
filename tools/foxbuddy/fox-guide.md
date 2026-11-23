@@ -400,6 +400,28 @@ Look at My Screen, the chat shortcut). Double-clicking him says chatting needs C
 button. To add Claude later: right-click › Setup › Set Up Claude…; it installs his helper, then Claude Code,
 then signs in (chatting needs Claude Pro or Max). He still offers his own updates in Just the Fox.
 
+## Message Alerts (iMessage and texts, through Shortcuts)
+
+Right-click › Message Alerts: Watch for Messages (off until turned on), How to Set It Up…, Show the Messages
+File. Works without Claude. He tells you who messaged you: a phone buzzes beside him and he says "Message
+from Natalie", with a Reply button that opens that conversation in Messages when the sender is a phone number
+or email address (otherwise it opens Messages). Several in a couple of minutes become one bubble ("3
+messages: Natalie, Mom"). Quiet in meetings, focus sessions and while hidden; held news shows afterwards.
+
+He can't see Messages himself (macOS keeps it private, and reading its database would need Full Disk
+Access). Instead a Shortcuts automation tells him. It needs macOS 26 (Tahoe) or later:
+1. Shortcuts app › Automation (sidebar) › New Automation › Message.
+2. Sender: pick people, or anyone. Leave Message Contains empty. Run Immediately, Notify When Run off.
+3. Action: Append to Text File. Text: Shortcut Input, then click it and pick Sender. File: Fox Buddy
+   Messages.txt (it lands in iCloud Drive › Shortcuts). Make New Line on.
+4. Right-click him › Message Alerts › Watch for Messages.
+Only the sender goes in the file, never the message text; a line can also be "date | sender". The iPhone
+Shortcuts app has the same Message automation, and since the file is in iCloud Drive he sees those too (a few
+seconds later, as iCloud syncs). He also checks iCloud Drive › Fox Buddy Messages.txt and Documents › Fox
+Buddy Messages.txt. Lines already in the file when he starts watching don't count. macOS asks once to let him
+into iCloud Drive. If nothing happens: check the automation is set to Run Immediately, and look at the file
+(Show the Messages File) to see whether lines are arriving.
+
 ## Little Touches
 
 Right-click › Little Touches. Small things he notices on the Mac by himself, no Claude involved. All on by
