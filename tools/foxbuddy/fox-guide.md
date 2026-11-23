@@ -102,9 +102,11 @@ the `spark` command, in /opt/homebrew/bin, /usr/local/bin, ~/.local/bin or ~/bin
 
 ## Command Bar (quick capture, sums, commands)
 
-A second shortcut, ⌃⌥ C by default, opens a one-line box in the middle of the screen from anywhere (Raycast
-style). Under the text it shows, as you type, what Return will do. No Claude involved: instant, and nothing
-leaves the Mac. Escape closes it. Right-click › Command Bar: Open the Command Bar, Save to Reminders, Save to
+A second shortcut, ⌃⌥ C by default, opens the Command Bar from anywhere (Raycast style): his speech balloon,
+the same one as his chat, with a one-line field. Empty, it shows a few examples to click. As you type, he
+answers underneath with what Return will do (a big answer for sums and conversions, or "Open Safari", or the
+reminder with its due date) and an orange button that does the same. No Claude involved: instant, and nothing
+leaves the Mac. Escape, clicking somewhere else, or the shortcut again closes it. Right-click › Command Bar: Open the Command Bar, Save to Reminders, Save to
 My Fox Buddy Inbox File, Open My Inbox File, and the shortcut (⌃⌥ C, ⌃⌥ N, ⇧⌥ Space, or No Shortcut).
 
 What it understands:

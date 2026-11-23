@@ -577,60 +577,6 @@ enum Calc {
     }
 }
 
-final class CapturePanel: NSPanel, NSTextFieldDelegate {
-    let field = NSTextField()
-    let result = NSTextField(labelWithString: ""), hint = NSTextField(labelWithString: "")
-    let onDone: (String?, Bool) -> Void                 // the text (nil: cancelled), and whether ⇧ Return forced a save
-    var preview: ((String) -> (String, String))?        // what Return would do: (the result line, a hint)
-    var placeholder: String { get { field.placeholderString ?? "" } set { field.placeholderString = newValue } }
-    override var canBecomeKey: Bool { true }
-
-    init(onDone: @escaping (String?, Bool) -> Void) {
-        self.onDone = onDone
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 600, height: 88), styleMask: [.titled, .fullSizeContentView],
-                   backing: .buffered, defer: false)
-        titleVisibility = .hidden; titlebarAppearsTransparent = true
-        standardWindowButton(.closeButton)?.isHidden = true
-        standardWindowButton(.miniaturizeButton)?.isHidden = true
-        standardWindowButton(.zoomButton)?.isHidden = true
-        isMovableByWindowBackground = true
-        level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let bg = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 600, height: 88))
-        bg.material = .popover; bg.state = .active
-        contentView = bg
-        field.frame = NSRect(x: 18, y: 46, width: 564, height: 28)
-        field.font = .systemFont(ofSize: 18)
-        field.isBordered = false; field.drawsBackground = false; field.focusRingType = .none
-        field.delegate = self
-        result.frame = NSRect(x: 19, y: 14, width: 380, height: 20)
-        result.font = .systemFont(ofSize: 15, weight: .semibold); result.lineBreakMode = .byTruncatingTail
-        hint.frame = NSRect(x: 400, y: 15, width: 182, height: 18)
-        hint.font = .systemFont(ofSize: 12); hint.textColor = .secondaryLabelColor; hint.alignment = .right
-        hint.lineBreakMode = .byTruncatingTail
-        bg.addSubview(field); bg.addSubview(result); bg.addSubview(hint)
-    }
-
-    func open() { field.stringValue = ""; refreshPreview(); makeKeyAndOrderFront(nil); makeFirstResponder(field) }
-    func refreshPreview() {
-        let (r, h) = preview?(field.stringValue) ?? ("", "")
-        result.stringValue = r; hint.stringValue = h
-        result.textColor = field.stringValue.trimmingCharacters(in: .whitespaces).isEmpty ? .secondaryLabelColor : .labelColor
-    }
-    func controlTextDidChange(_ obj: Notification) { refreshPreview() }
-
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
-        if sel == #selector(NSResponder.insertNewline(_:)) || sel == #selector(NSResponder.insertLineBreak(_:))
-            || sel == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
-            let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
-            let t = field.stringValue; orderOut(nil); onDone(t, shift || sel != #selector(NSResponder.insertNewline(_:))); return true
-        }
-        if sel == #selector(NSResponder.cancelOperation(_:)) { orderOut(nil); onDone(nil, false); return true }
-        return false
-    }
-    override func resignKey() { super.resignKey(); if isVisible { orderOut(nil) } }
-}
-
 final class BubblePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -2291,6 +2237,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         bubbleWeb.navigationDelegate = self
         bubble.contentView = bubbleWeb
         bubbleWeb.loadFileURL(webDir.appendingPathComponent("bubble.html"), allowingReadAccessTo: webDir)
+        // the Command Bar closes when you click away from it, like Spotlight
+        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: bubble, queue: .main) { [weak self] _ in
+            if self?.bubbleMode == "cmd" { self?.hideBubble() }
+        }
     }
 
     func bubbleJS(_ code: String) {
@@ -2630,7 +2580,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     /// Reminders (with a due date if you wrote one, like "Tuesday at 3", found by macOS's own date detector) or
     /// to a plain file, ~/Documents/Fox Buddy Inbox.md. No Claude involved: instant, and nothing leaves the Mac.
     let captureKey = HotKey(slot: 2)
-    var capturePanel: CapturePanel?
     var captureReturnTo: NSRunningApplication?
     var captureKeyID: String { prefs.string(forKey: "captureKey") ?? "ctrl-opt-c" }
     var captureTo: String {              // "reminders" or "inbox"
@@ -2648,23 +2597,44 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
     }
 
+    /// The Command Bar opens in his speech balloon, like his chat: a one-line field, and under it, as you type,
+    /// what Return will do, in his voice. Esc, a click elsewhere, or the shortcut again closes it.
     @objc func openCapture() {
-        if let p = capturePanel, p.isVisible { p.close(); return }
+        guard bubble != nil else { return }
+        if bubbleMode == "cmd" && bubble.isVisible { hideBubble(); return }
         captureReturnTo = NSWorkspace.shared.frontmostApplication
-        let p = capturePanel ?? CapturePanel(onDone: { [weak self] text, force in self?.captured(text, force: force) })
-        capturePanel = p
-        p.placeholder = captureTo == "reminders" ? "Remind me to…, or a sum, or a command" : "Jot it down…, or a sum, or a command"
-        p.preview = { [weak self] t in
-            guard let self = self else { return ("", "") }
-            let s = t.trimmingCharacters(in: .whitespaces)
-            if s.isEmpty { return ("Try 18% of 240, 5 lbs in oz, awake 1h, lock, or an app's name", "Esc closes") }
-            if let c = self.command(for: s) { return (c.title, c.hint.isEmpty ? "⇧ Return saves it instead" : c.hint) }
-            return ("", self.captureTo == "reminders" ? "Return adds it to Reminders" : "Return saves it to your inbox")
+        let reminders = captureTo == "reminders"
+        let app = ["Safari", "Notes", "Calendar", "Mail"].first { name in appList().contains { $0.name == name } } ?? "Finder"
+        bubbleMode = "cmd"; bubbleJump = nil
+        bubbleJS("bubble.command(\(jsonLiteral([
+            "placeholder": reminders ? "Do a sum, open an app, or remind me…" : "Do a sum, open an app, or jot it down…",
+            "tip": reminders ? "Ask me to do something, or tell me something to remember." : "Ask me to do something, or tell me something to jot down.",
+            "chips": ["18% of 240", "5 lbs in oz", "awake 1h", "lock", app],
+        ] as [String: Any])))")
+        showBubble(key: true)
+        js("desk.wake()")
+    }
+
+    /// What the balloon shows for what's typed so far.
+    func cmdPreview(_ raw: String) -> [String: Any] {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return ["empty": true] }
+        if let c = command(for: s) {
+            let copies = c.hint.hasPrefix("Return copies")
+            let button = copies ? "Copy" : c.title.hasPrefix("Open ") ? "Open" : c.title.hasPrefix("Keep the Mac awake") ? "Keep It Awake"
+                : c.title.hasPrefix("Start a") ? "Start" : c.title.hasPrefix("Already") || c.title.hasSuffix("already showing") || c.title.hasSuffix("already hidden") ? "OK" : "Do It"
+            var p: [String: Any] = ["title": copies ? (c.title.hasPrefix("= ") ? String(c.title.dropFirst(2)) : c.title) : c.title,
+                                    "big": copies, "button": button,
+                                    "keys": [["↩", copies ? "copies" : button.lowercased()], ["⇧↩", "saves it instead"]]]
+            if !c.hint.isEmpty && !copies { p["sub"] = c.hint }
+            return p
         }
-        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
-        if let f = screen?.visibleFrame { p.setFrameOrigin(NSPoint(x: f.midX - p.frame.width / 2, y: f.maxY - f.height * 0.28)) }
-        NSApp.activate(ignoringOtherApps: true)
-        p.open()
+        if captureTo == "reminders" {
+            let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short; f.doesRelativeDateFormatting = true
+            return ["title": "“\(s.prefix(200))”", "sub": App.dueDate(in: s).map { "Due \(f.string(from: $0))" } ?? "No due date",
+                    "button": "Add to Reminders", "keys": [["↩", "adds it"]]]
+        }
+        return ["title": "“\(s.prefix(200))”", "sub": "Goes in Fox Buddy Inbox.md, in Documents", "button": "Save It", "keys": [["↩", "saves it"]]]
     }
 
     func captured(_ raw: String?, force: Bool = false) {
@@ -4517,6 +4487,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         if let on = body["readFiles"] as? Bool { asker.readFiles = on }
         if let path = body["reveal"] as? String { reveal(path) }
+        if let c = body["cmd"] as? String, bubbleMode == "cmd" {
+            let text = body["text"] as? String ?? ""
+            if c == "preview" { bubbleJS("bubble.cmdPreview(\(jsonLiteral(cmdPreview(text))))") }
+            if c == "run" { hideBubble(); captured(text, force: body["force"] as? Bool == true) }
+        }
         if body.keys.contains("welcome") { finishWelcome(body["welcome"] as? [String: Any]) }
         if body["newChat"] as? Bool == true { asker.reset(); showAttached() }
         if let d = body["detach"] as? String { asker.attached.removeAll { $0 == d }; showAttached() }

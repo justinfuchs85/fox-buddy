@@ -166,6 +166,22 @@
                display: grid; place-items: center; cursor: pointer; padding: 0; }
   button.mic:hover { color: var(--ink); background: var(--wash); }
   button.mic.on { color: var(--on-fox); background: var(--fox); border-color: var(--edge); }
+  /* the Command Bar: his balloon with a one-line field; what Return will do shows as his reply underneath */
+  #cmd { width: 340px; }
+  .field { display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--fox); border-radius: 12px 11px 13px 11px; padding: 6px 10px; margin-right: 18px; }
+  .field .paw { width: 15px; height: 15px; flex: none; background: no-repeat center / contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='%23FF7A45'%3E%3Cellipse cx='10' cy='13.5' rx='5' ry='4.3'/%3E%3Ccircle cx='3.6' cy='8' r='2'/%3E%3Ccircle cx='7.6' cy='4.4' r='2.1'/%3E%3Ccircle cx='12.4' cy='4.4' r='2.1'/%3E%3Ccircle cx='16.4' cy='8' r='2'/%3E%3C/g%3E%3C/svg%3E"); }
+  #cmdInput { flex: 1; min-width: 0; border: 0; outline: none; background: none; font: 15px/1.3 -apple-system, BlinkMacSystemFont, sans-serif; color: var(--ink); padding: 0; }
+  #cmdInput::placeholder { color: var(--muted); }
+  #cmdOut { margin-top: 9px; }
+  #cmdOut .big { font: 800 24px/1.15 var(--round); word-break: break-word; }
+  #cmdOut .what { font: 650 14.5px/1.35 var(--round); word-break: break-word; }
+  #cmdOut .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  #cmdOut .tip { color: var(--muted); font-size: 12.5px; }
+  #cmdOut .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  #cmdOut .row { margin-top: 9px; }
+  .keys { color: var(--muted); font: 600 11.5px/1.3 var(--round); white-space: nowrap; }
+  .keys + .keys { margin-left: 8px; }
+  kbd { font: 600 11px/1 var(--round); border: 1.5px solid var(--line); border-bottom-width: 2.5px; border-radius: 5px; padding: 1px 4px; color: var(--ink); }
   [hidden] { display: none !important; }
 </style></head>
 <body>
@@ -173,6 +189,10 @@
   <div id="card">
     <button id="close" title="Close">×</button>
     <div id="say"><div id="text"></div><div class="actions" id="sayActions" hidden><button class="act primary" id="jump">Show me</button></div></div>
+    <div id="cmd" hidden>
+      <div class="field"><span class="paw" aria-hidden="true"></span><input id="cmdInput" autocomplete="off" spellcheck="false" aria-label="Command Bar"></div>
+      <div id="cmdOut" aria-live="polite"></div>
+    </div>
     <div id="welcome" hidden>
       <div id="wStep"></div>
       <div class="row">
@@ -230,7 +250,7 @@
     return out.join('');
   }
 
-  function mode(m) { for (const k of ['say', 'chat', 'welcome']) $(k).hidden = m !== k; document.body.dataset.mode = m; report(); }
+  function mode(m) { for (const k of ['say', 'chat', 'welcome', 'cmd']) $(k).hidden = m !== k; document.body.dataset.mode = m; report(); }
   function report() { requestAnimationFrame(() => { const r = $('wrap').getBoundingClientRect(); post({ size: { w: Math.ceil(r.width), h: Math.ceil(r.height) } }); }); }
   new ResizeObserver(report).observe($('wrap'));
   function timeout(sec) {
@@ -284,6 +304,28 @@
       // offer with a button (Prep me, Open in Gmail), gets a minute, like his chat; he keeps waving or holding
       // the letter after it tucks away, so you still know something's waiting.
       timeout(m.kind === 'needs' ? 60 : m.jump ? 30 : m.kind === 'done' ? 14 : 6);
+    },
+    // The Command Bar. command(): open it empty, with a few examples to click. cmdPreview(): what Return would do
+    // with what's typed ({ empty } | { title, big, sub, button, keys: [[key, label]] }), worked out by the app.
+    command(m) {
+      clearTimeout(ttlTimer); $('card').className = ''; mode('cmd');
+      cmdChips = m.chips || []; cmdTip = m.tip || '';
+      $('cmdInput').value = ''; $('cmdInput').placeholder = m.placeholder || '';
+      window.bubble.cmdPreview({ empty: true });
+      setTimeout(() => $('cmdInput').focus(), 30);
+    },
+    cmdPreview(p) {
+      const o = $('cmdOut');
+      if (p.empty) {
+        o.innerHTML = '<div class="tip">' + esc(cmdTip) + '</div><div class="chips">' + cmdChips.map(c => '<button class="chip">' + esc(c) + '</button>').join('') + '</div>';
+        o.querySelectorAll('.chip').forEach(b => b.onclick = () => { $('cmdInput').value = b.textContent; cmdChanged(); $('cmdInput').focus(); });
+      } else {
+        const keys = (p.keys || []).map(k => '<span class="keys"><kbd>' + esc(k[0]) + '</kbd> ' + esc(k[1]) + '</span>').join('');
+        o.innerHTML = '<div class="' + (p.big ? 'big' : 'what') + '">' + inline(p.title || '') + '</div>' + (p.sub ? '<div class="sub">' + esc(p.sub) + '</div>' : '') +
+          '<div class="row"><button class="act primary" id="cmdGo">' + esc(p.button || 'Do It') + '</button><span class="spacer"></span>' + keys + '</div>';
+        $('cmdGo').onclick = () => cmdRun(false);
+      }
+      report();
     },
     chat(focus = true) { clearTimeout(ttlTimer); $('card').className = ''; mode('chat'); scrollDown(); if (focus) setTimeout(() => $('input').focus(), 30); },
     thinking(q) { turns.push({ you: q, fox: '' }); addYou(q); pending(); setBusy(true); mode('chat'); scrollDown(); },
@@ -496,6 +538,14 @@
   $('look').onclick = () => post({ lookAtScreen: true });
   $('input').addEventListener('input', () => { const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight + 2) + 'px'; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') post({ action: 'dismiss' }); });
+  let cmdChips = [], cmdTip = '';
+  const cmdChanged = () => post({ cmd: 'preview', text: $('cmdInput').value.slice(0, 500) });
+  const cmdRun = force => { const t = $('cmdInput').value.trim(); if (t) post({ cmd: 'run', text: t.slice(0, 2000), force }); };
+  $('cmdInput').addEventListener('input', cmdChanged);
+  $('cmdInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); cmdRun(e.shiftKey); }
+    const t = Date.now(); if (t - typedAt > 300) { typedAt = t; post({ typing: true }); }
+  });
   mode('say');
 })();
 </script>
