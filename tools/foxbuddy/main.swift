@@ -2606,11 +2606,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         let reminders = captureTo == "reminders"
         let app = ["Safari", "Notes", "Calendar", "Mail"].first { name in appList().contains { $0.name == name } } ?? "Finder"
         bubbleMode = "cmd"; bubbleJump = nil
-        bubbleJS("bubble.command(\(jsonLiteral([
+        let setup: [String: Any] = [
             "placeholder": reminders ? "Do a sum, open an app, or remind me…" : "Do a sum, open an app, or jot it down…",
             "tip": reminders ? "Ask me to do something, or tell me something to remember." : "Ask me to do something, or tell me something to jot down.",
             "chips": ["18% of 240", "5 lbs in oz", "awake 1h", "lock", app],
-        ] as [String: Any])))")
+        ]
+        bubbleJS("bubble.command(\(jsonLiteral(setup)))")
         showBubble(key: true)
         js("desk.wake()")
     }
