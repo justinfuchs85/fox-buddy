@@ -42,6 +42,10 @@ git rev-parse -q --verify "refs/tags/v$next" >/dev/null && { echo "v$next alread
 if [ -n "$last" ]; then
   changes="$(git log --oneline --no-merges "$last"..HEAD)"
   [ -n "$changes" ] || { echo "Nothing new since $last, so there's nothing to ship."; exit 0; }
+  # Every release adds a Homebrew commit (Casks/) afterwards; that alone isn't worth a release.
+  if [ -z "$(git diff --name-only "$last"..HEAD -- . ':(exclude)Casks')" ]; then
+    echo "Only the Homebrew listing has changed since $last, so there's nothing to ship."; exit 0
+  fi
   echo "Changes since $last:"; print -r -- "$changes" | sed 's/^/  /'
 fi
 echo
