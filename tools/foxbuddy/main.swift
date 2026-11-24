@@ -2591,10 +2591,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func setUpCaptureKey() {
         HotKey.actions[2] = { [weak self] in self?.openCapture() }
         let want = captureKeyID
+        let title = HotKey.captureChoices.first { $0.id == want }?.title
+        var working = want != "off" && title != nil
         if want != "off", !captureKey.register(want) {
-            let t = HotKey.captureChoices.first { $0.id == want }?.title ?? want
-            say("Another app already uses \(t), so the Command Bar has no shortcut. Pick another under Command Bar in my menu.")
+            working = false
+            say("Another app already uses \(title ?? want), so the Command Bar has no shortcut. Pick another under Command Bar in my menu.")
         }
+        bubbleJS("bubble.cmdKey(\(jsonLiteral(working ? title ?? "" : "")))")   // the reminder under his chat
     }
 
     /// The Command Bar opens in his speech balloon, like his chat: a one-line field, and under it, as you type,
@@ -4497,6 +4500,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if body["newChat"] as? Bool == true { asker.reset(); showAttached() }
         if let d = body["detach"] as? String { asker.attached.removeAll { $0 == d }; showAttached() }
         if body["editNotes"] as? Bool == true { openNotesFile() }
+        if body["openCommand"] as? Bool == true { openCapture() }
         if body["typing"] as? Bool == true { watchTyping() }
         if body["dictate"] as? Bool == true { startDictation() }
         if body["lookAtScreen"] as? Bool == true { lookAtScreen() }
