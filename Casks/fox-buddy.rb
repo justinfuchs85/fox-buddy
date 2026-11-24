@@ -3,8 +3,8 @@
 #   brew tap justinfuchs85/fox-buddy https://github.com/justinfuchs85/fox-buddy
 #   brew install --cask justinfuchs85/fox-buddy/fox-buddy
 cask "fox-buddy" do
-  version "1.1.8"
-  sha256 "66d30dcb244aa4eb6885739b6873b955ff926f1a3f68addd01e2a05831f94c96"
+  version "1.1.9"
+  sha256 "cd3d8ef53ba4197af8ddf1fb14bcc132960a1519eb9add2936f3d8ca8b92584b"
 
   url "https://github.com/justinfuchs85/fox-buddy/releases/download/v#{version}/Fox-Buddy-#{version}.dmg"
   name "Fox Buddy"
