@@ -443,10 +443,14 @@
   const CALENDAR_TOOLS = ['create_event', 'update_event', 'delete_event', 'respond_to_event'], GMAIL_TOOLS = ['create_draft', 'update_draft'];
   const APPLE_TOOLS = { reminders_add: 'Reminders', reminders_complete: 'Reminders', notes_create: 'Notes', shortcuts_run: 'Shortcut',
                         spark_draft: 'Spark draft', spark_action: 'Spark' };   // his own tools (Spark Mail is Readdle's, through its spark command)
+  // An extra tool server's change (fox-tools.json "changes"), named "server:tool". The app checks it's really listed.
+  const EXTRA_TOOL = /^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/;
+  const extraLabel = t => { const s = t.split(':')[0].replace(/[_-]+/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1); };
   // {tool, summary, input} from a fox-confirm block, or null if it isn't one of the change tools with an arguments object.
   function proposal(body) {
     let p; try { p = JSON.parse(body); } catch (e) { return null; }
-    if (!p || typeof p !== 'object' || ![...CALENDAR_TOOLS, ...GMAIL_TOOLS, ...Object.keys(APPLE_TOOLS)].includes(p.tool)) return null;
+    if (!p || typeof p !== 'object' || typeof p.tool !== 'string') return null;
+    if (![...CALENDAR_TOOLS, ...GMAIL_TOOLS, ...Object.keys(APPLE_TOOLS)].includes(p.tool) && !EXTRA_TOOL.test(p.tool)) return null;
     if (!p.input || typeof p.input !== 'object' || Array.isArray(p.input) || typeof p.summary !== 'string' || !p.summary.trim()) return null;
     return { tool: p.tool, summary: p.summary.trim().slice(0, 500), input: p.input };
   }
@@ -458,7 +462,7 @@
     settleAll('Not done.');
     const local = ['remember', 'forget', 'watch', 'unwatch'].includes(ask.kind);   // notes and email alerts: the app does it, no reply needed
     const LOCAL = { remember: ['Remember', 'Save it'], forget: ['Forget', 'Forget it'], watch: ['Email alert', 'Set it up'], unwatch: ['Remove email alert', 'Remove it'] };
-    const calendar = CALENDAR_TOOLS.includes(ask.tool), apple = APPLE_TOOLS[ask.tool];
+    const calendar = CALENDAR_TOOLS.includes(ask.tool), apple = APPLE_TOOLS[ask.tool] || (EXTRA_TOOL.test(ask.tool || '') && extraLabel(ask.tool));
     const emails = local ? [] : [...new Set(JSON.stringify(ask.input).match(EMAIL) || [])];
     const warn = local ? ''
       : calendar && emails.length && ask.tool !== 'delete_event' ? `<div class="warn">Google Calendar may email: ${esc(emails.join(', '))}</div>`

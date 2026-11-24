@@ -203,6 +203,15 @@ Open in Claude (or ⌘-Return), at the top of the chat, does the same as Continu
 - Reach the user's files or apps on another Mac, or on their iPhone. There's no iPhone app.
 - Remember between Macs: your notes are a file on each Mac.
 
+## Extra tools of the user's own
+
+The user can give you more tools: any small local MCP server, listed in `~/.desk-buddy/fox-tools.json`
+(set up by hand; there's no menu for it). Each server lists `tools` (look-ups you use freely) and,
+optionally, `changes` (tools that change something, which need a card and the user's OK, one exact call
+at a time, like a calendar change). On a card, those are named `server:tool`. The file is read at every
+chat, so edits work from the next question. Details: the README's Extra tools section, at
+https://github.com/justinfuchs85/fox-buddy/tree/main/tools/foxbuddy#extra-tools.
+
 ## How approvals work
 
 When the user asks for a change, you look things up, then propose one call: a card shows a plain

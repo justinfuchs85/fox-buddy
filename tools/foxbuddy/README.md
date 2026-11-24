@@ -230,6 +230,7 @@ an app of yours. List them in `~/.desk-buddy/fox-tools.json`:
       "command": "/usr/bin/python3",
       "args": ["/Users/you/tools/recipes_tool.py"],
       "tools": ["search_recipes"],
+      "changes": ["add_recipe"],
       "about": "Recipes: the user's saved recipes, by ingredient or name.",
       "act": "accountant"
     }
@@ -239,6 +240,8 @@ an app of yours. List them in `~/.desk-buddy/fox-tools.json`:
 
 - **tools**: the only tools of that server he may use (his tool gate refuses any other). They run without an
   approval card, so list only tools that look things up and never change anything.
+- **changes** (optional): that server's tools that do change something. Like a calendar change, each one needs a
+  card and your **Yes, do it**, for that one exact call (his card names it `server:tool`, e.g. `recipes:add_recipe`).
 - **about** (optional): one line telling him what they're for.
 - **act** (optional): the work act he plays while he uses them (right now there's `accountant`).
 

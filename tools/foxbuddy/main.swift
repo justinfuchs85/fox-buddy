@@ -682,13 +682,15 @@ struct FoxSetup {
 ///                               "act": "accountant" } } }
 ///
 /// Only the tools listed are allowed (the gate refuses any other), and they run without an approval card, so list
-/// only tools that look things up and never change anything. "about" (optional) tells him what they're for;
-/// "act" (optional) is the work act he plays while he uses them.
+/// only tools that look things up and never change anything. "changes" (optional) lists the server's tools that do
+/// change something: like Calendar or Reminders changes, each needs a card and the user's OK, one exact call at a time.
+/// "about" (optional) tells him what they're for; "act" (optional) is the work act he plays while he uses them.
 struct ExtraServer {
     let name: String
     let command: String
     let args: [String]
     let tools: [String]
+    let changes: [String]
     let about: String?
     let act: String?
 
@@ -705,15 +707,18 @@ struct ExtraServer {
                   FileManager.default.isExecutableFile(atPath: command) else { continue }
             let args = ((d["args"] as? [String]) ?? []).prefix(40).map { String($0.prefix(1000)) }
             let tools = ((d["tools"] as? [String]) ?? []).filter { $0.range(of: word, options: .regularExpression) != nil }
-            guard !tools.isEmpty else { continue }
+            let changes = ((d["changes"] as? [String]) ?? []).filter { $0.range(of: word, options: .regularExpression) != nil && !tools.contains($0) }
+            guard !tools.isEmpty || !changes.isEmpty else { continue }
             let about = (d["about"] as? String).map { String($0.replacingOccurrences(of: "\n", with: " ").prefix(500)) }
             let act = (d["act"] as? String).flatMap { $0.range(of: #"^[a-z]{1,20}$"#, options: .regularExpression) != nil ? $0 : nil }
-            out.append(ExtraServer(name: name, command: command, args: Array(args), tools: tools, about: about, act: act))
+            out.append(ExtraServer(name: name, command: command, args: Array(args), tools: tools, changes: changes, about: about, act: act))
         }
         return out
     }
 
     var allowed: [String] { tools.map { "mcp__\(name)__\($0)" } }
+    /// A confirm card names its tool as "server:tool" (so two servers' tools can't be mixed up).
+    var changeNames: [String] { changes.map { "\(name):\($0)" } }
 }
 
 /// Which of your claude.ai connectors Claude Code can reach (Gmail, Google Calendar), found with `claude mcp list`
@@ -813,6 +818,10 @@ struct Approval {
         else if GMAIL_CHANGE.contains(short) { prefix = "mcp__\(setup.gmail)__" }
         else if setup.apple && APPLE_CHANGE.contains(short) { prefix = "mcp__foxbuddy__" }
         else if setup.spark != nil && SPARK_CHANGE.contains(short) { prefix = "mcp__foxbuddy__" }
+        else if let x = setup.extras.first(where: { $0.changeNames.contains(short) }) {
+            // your own extra server's change ("recipes:add_recipe"): only the ones it lists under "changes"
+            return Approval(tool: "mcp__\(x.name)__" + String(short.dropFirst(x.name.count + 1)), summary: String(summary.prefix(500)), input: input)
+        }
         else { return nil }
         return Approval(tool: prefix + short, summary: String(summary.prefix(500)), input: input)
     }
@@ -1012,7 +1021,7 @@ final class Asker {
         ```fox-confirm
         {"tool": "update_event", "summary": "Move \\"Dentist\\" from Thu 2:00 PM to Fri 3:00 PM", "input": {"...": "the exact arguments"}}
         ```
-        tool is one of \(CALENDAR_CHANGE.joined(separator: ", ")) (Google Calendar), \(GMAIL_CHANGE.joined(separator: ", ")) (Gmail drafts)\(setup.apple ? ", or " + APPLE_CHANGE.joined(separator: ", ") + " (Reminders, Notes, Shortcuts; foxbuddy tools, so their parameters are already in your tool list)" : "")\(setup.spark != nil ? ", or " + SPARK_CHANGE.joined(separator: ", ") + " (Spark Mail: a draft, never sent, or an action like archive or snooze on emails; foxbuddy tools)" : ""). \
+        tool is one of \(CALENDAR_CHANGE.joined(separator: ", ")) (Google Calendar), \(GMAIL_CHANGE.joined(separator: ", ")) (Gmail drafts)\(setup.apple ? ", or " + APPLE_CHANGE.joined(separator: ", ") + " (Reminders, Notes, Shortcuts; foxbuddy tools, so their parameters are already in your tool list)" : "")\(setup.spark != nil ? ", or " + SPARK_CHANGE.joined(separator: ", ") + " (Spark Mail: a draft, never sent, or an action like archive or snooze on emails; foxbuddy tools)" : "")\(Asker.extraChanges(setup)). \
         One change per reply. The user sees the summary and every argument, and gets a button to approve it. Only then can you make \
         that call, and only with exactly those arguments. Never add attendees, guests or recipients the user didn't ask for.
 
@@ -1034,6 +1043,13 @@ final class Asker {
         }
         if !notes.isEmpty { t += "\n\nWhat the user wants you to know about them (their own notes):\n" + notes }
         return t
+    }
+
+    /// The change tools of your own extra servers, for the fox-confirm line: named "server:tool".
+    static func extraChanges(_ setup: FoxSetup) -> String {
+        let names = setup.extras.flatMap { $0.changeNames }
+        return names.isEmpty ? "" : ", or " + names.joined(separator: ", ") +
+            " (your other tools; write the tool exactly like that, with the part before the colon, and look up its parameters with ToolSearch)"
     }
 
     /// How chatty he is (the user picked it in the welcome). Always on the user's side, answer first, kind when it's serious.
