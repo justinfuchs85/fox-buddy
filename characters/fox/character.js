@@ -6,8 +6,8 @@
   const F = window.__foxDraw, R = window.__foxRig;
   const { CREAM, INK, DARK, stroke, dot, trace, wob, part, oval } = F;
 
-  const MOMENTS = ['idle', 'working', 'alert', 'done', 'waiting', 'longhaul', 'night', 'meeting', 'awake', 'letter', 'flag', 'boombox', 'hop'];
-  const BASE = { idle: 'idle', working: 'working', alert: 'alert', done: 'done', waiting: 'alert', longhaul: 'working', night: 'idle', meeting: 'meeting', awake: 'awake', letter: 'letter', flag: 'done', boombox: 'done', hop: 'awake' };
+  const MOMENTS = ['idle', 'working', 'alert', 'done', 'waiting', 'longhaul', 'night', 'meeting', 'awake', 'letter', 'flag', 'boombox', 'hop', 'printdone', 'printfail'];
+  const BASE = { idle: 'idle', working: 'working', alert: 'alert', done: 'done', waiting: 'alert', longhaul: 'working', night: 'idle', meeting: 'meeting', awake: 'awake', letter: 'letter', flag: 'done', boombox: 'done', hop: 'awake', printdone: 'done', printfail: 'alert' };
   const GAGS = ['pounce', 'tailchase', 'sneeze', 'howl', 'zoomies', 'hiccup', 'leaf', 'boop', 'yawn', 'peekaboo', 'disco', 'floss', 'dab', 'dubstep'];
 
   const D = {}, LOOPS = {}, TRANS = {}, CLIPS = {};
@@ -107,6 +107,35 @@
     brew(true); brew(false);
     return out;
   }
+  // 3D printer: he sits beside a little enclosed printer and watches it work. The toolhead zips back and forth, the bed
+  // drops a layer at a time as the print grows (a little fox-head figurine), his eyes follow the nozzle; he rests his
+  // chin on his paws, leans in for the last layers, then lifts the finished print out, admires it and sets it down.
+  // (Not in the usual rotation: Fox Buddy plays it for questions about the printer.)
+  const PRN = { x: 22, prop: 'printer' };
+  function printer(tired) {
+    const W = worker(tired, PRN), out = [];
+    const layers = 14;
+    for (let l = 0; l < layers; l++) {
+      const prog = l / layers, late = l >= layers - 3;
+      const chin = l >= 4 && l < 9;                               // a while with his chin on his paws
+      const base = chin ? { armL: [116, 156], armR: [140, 156], hy: 7, tilt: -0.06, eyes: 'look', mouth: 'w' }
+        : late ? { lean: -0.1, hx: -4, hy: 4, eyes: 'wide', mouth: 'o', perk: 1.1 } : { lean: -0.05, hx: -2, mouth: 'flat' };
+      for (const n of [-1, -0.33, 0.33, 1, 0.33, -0.33]) {        // one pass of the toolhead per layer
+        out.push(...W([[3, { ...base, prog, nozzle: n, look: [-3 + n * 1.4, 2.5], glow: 1 }]]));
+      }
+      if (l === 6) out.push(...W([[20, { ...base, prog, nozzle: -1, look: [-1, -1], eyes: 'happy', mouth: 'smile', glow: 1 }]]));   // a contented look up
+    }
+    // done: a little ding, the bed comes up, he reaches in and lifts it out
+    out.push(...W([[6, { prog: 1, nozzle: 1, glow: 1, fx: 'ding', eyes: 'happy', mouth: 'open', y: -4 }],
+      [10, { prog: 1, nozzle: 1, glow: 1, eyes: 'happy', mouth: 'smile', armL: [70, 150], look: [-3, 2] }],
+      [6, { prog: 1, nozzle: 1, glow: 1, armL: [52, 168], lean: -0.12, look: [-3, 3] }],
+      [8, { prog: 0, nozzle: 1, glow: 1, held: 1, armR: [170, 130], eyes: 'wide', mouth: 'o', look: [3, 0] }],
+      [26, { prog: 0, nozzle: 1, glow: 1, held: 1, armR: [186, 86], armL: [100, 150], eyes: 'happy', mouth: 'open', blush: true, fx: 'swag', y: -3, tilt: 0.06 }],
+      [12, { prog: 0, nozzle: 1, glow: 1, held: 1, armR: [178, 100], eyes: 'look', look: [3, -2], mouth: 'smile', tilt: 0.1 }],
+      [8, { prog: 0, nozzle: 1, glow: 1, shelf: 1, armR: [196, 186], look: [3, 3], lean: 0.08 }],
+      [12, { prog: 0, nozzle: -1, glow: 1, shelf: 1, mouth: 'w', look: [-3, 2] }]]));
+    return out;
+  }
   // the acts back to back, with a puff of smoke to swap his gear (and round from the last to the first)
   const POOF_SWAP = (prev, next) => [[mix(prev, { fx: 'poof', poof: 0.15 }), 3], [mix(prev, { fx: 'poof', poof: 0.45 }), 3], [mix(next, { fx: 'poof', poof: 0.75 }), 3], [mix(next, { fx: 'poof', poof: 1 }), 3]];
   function shift(tired) {
@@ -152,6 +181,20 @@
     boombox: () => Array.from({ length: 8 }, (_, i) => [mix(AWAKE, { eyes: i % 4 === 3 ? 'happy' : 'closed', mouth: i % 2 ? 'smile' : 'w',
       armL: [80, 66 + (i % 2) * 3], armR: [176, 66 + (i % 2) * 3], prop: 'boombox', hy: i % 2 ? 2 : -1, y: i % 2 ? 0 : -2,
       squash: i % 2 ? 0.04 : -0.02, earL: 0.35, earR: 0.35, tilt: wave(i, 8, 0.05), tail: 0.25 + wave(i, 8, 0.2), fx: 'notes' }), 4]),
+    // printdone: a print just finished. He holds it up over his head, bouncing, the empty printer beside him.
+    printdone: () => {
+      const ys = [0, -6, -10, -6, 0, 0];
+      return ys.map((y, i) => [mix(AWAKE, { ...PRN, eyes: 'happy', mouth: i % 3 === 2 ? 'smile' : 'open', blush: true, y, squash: i === 0 || i === 4 ? 0.06 : -0.03,
+        armR: [186, 80 + y], armL: i % 2 ? [98, 110 + y] : [92, 120 + y], held: 2, prog: 0, nozzle: 1, glow: 1, tilt: 0.06, tail: 0.3 + wave(i, 6, 0.15), fx: 'done' }), 4]);
+    },
+    // printfail: spaghetti. The print came loose and the printer's been extruding into thin air: a tangle on the bed,
+    // a blob on the nozzle, a strand down the front. He looks at it, paws to his cheeks, then a slow facepalm.
+    printfail: () => [
+      [mix(AWAKE, { ...PRN, spaghetti: 1, nozzle: 0.2, glow: 1, eyes: 'wide', look: [-3, 2], brows: 'worried', mouth: 'wobble', armL: [104, 128], armR: [152, 128], earL: 0.35, earR: 0.3, lean: -0.04, fx: 'none' }), 18],
+      [mix(AWAKE, { ...PRN, spaghetti: 1, nozzle: 0.2, glow: 1, eyes: 'wide', look: [-3, 3], brows: 'worried', mouth: 'o', armL: [104, 126], armR: [152, 126], earL: 0.4, earR: 0.35, lean: -0.06, fx: 'none' }), 12],
+      [mix(AWAKE, { ...PRN, spaghetti: 1, nozzle: 0.2, glow: 1, eyes: 'closed', brows: 'worried', mouth: 'flat', armR: [140, 104], earL: 0.45, earR: 0.4, hy: 4, fx: 'sweat' }), 20],
+      [mix(AWAKE, { ...PRN, spaghetti: 1, nozzle: 0.2, glow: 1, eyes: 'squint', look: [-2, 2], brows: 'worried', mouth: 'wobble', armR: [140, 106], earL: 0.45, earR: 0.4, hy: 3, fx: 'sweat' }), 16],
+    ],
     letter: () => Array.from({ length: 6 }, (_, i) => [mix(AWAKE, { eyes: 'happy', mouth: 'smile', armL: [104, 172 - (i % 2) * 3], armR: [152, 172 - (i % 2) * 3], prop: 'letter', y: i % 3 === 0 ? -3 : 0, tail: 0.2 + wave(i, 6, 0.2), fx: 'none' }), 4]),
   };
   const firstPose = {};
@@ -186,7 +229,7 @@
       out.tailK = (out.tailK || 1) * (1 - 0.4 * Math.sin(Math.PI * t));
     for (const k of ['leaf', 'bubble'])                  // drifting leaf, growing bubble: smooth too, while both have one
       if (typeof a[k] === 'number' && typeof b[k] === 'number' && a[k] >= 0 && b[k] >= 0) out[k] = a[k] * (1 - t) + b[k] * t;
-    for (const k of ['tape', 'crank', 'page', 'carriage', 'pour', 'boil', 'levelL', 'levelR', 'toss', 'poof', 'tilthat'])   // his work props
+    for (const k of ['tape', 'crank', 'page', 'carriage', 'pour', 'boil', 'levelL', 'levelR', 'toss', 'poof', 'tilthat', 'nozzle'])   // his work props
       if (typeof a[k] === 'number' && typeof b[k] === 'number') out[k] = a[k] * (1 - t) + b[k] * t;
     for (const s of ['L', 'R']) {
       const ka = a['arm' + s], kb = b['arm' + s];
@@ -229,7 +272,7 @@
   // work calls for it (Fox Buddy shows the accountant for money questions). It starts on the same drawings as
   // the full rotation, so the player can switch over mid-act without a jump; SWAPS[...] is a puff of smoke
   // for switching from the middle of another act.
-  const ACTS = { accountant };
+  const ACTS = { accountant, printer };
   const SWAPS = {};
   for (const [name, act] of Object.entries(ACTS)) for (const m of HOLD) {
     const frames = act(m === 'longhaul');
@@ -489,6 +532,50 @@
       for (const s of [-1, 1]) dot(c, x + s * 6, T + 15, 2.6, '#5B6170');
       for (let k = 0; k < 4; k++) dot(c, x - 9 + k * 6, T + h - 7, 1.8, k === 1 ? '#E8454B' : CREAM);               // buttons
     },
+    // A small enclosed 3D printer beside him (a stubby cube with a glass door): the toolhead on its gantry near the top,
+    // the bed dropping a layer at a time as the print grows (it's a core-XY, so the bed moves, not the head), a warm
+    // light inside and a progress bar on the little screen. prog 0..1, nozzle -1..1, spaghetti, held, shelf.
+    printer(c, P, a, seed, tick) {
+      const px = 17 + (P.x || 0), y = 201, L = px - 36, R = px + 36, T = y - 70, PW = { width: 3.6, wobble: 0.4 };
+      const build = Math.max(0, Math.min(1, P.prog || 0));
+      const sx = px - 6, sy = T - 15, turn2 = (P.glow ? tick * 0.06 : 0);                                              // a spool of filament on top
+      part(c, oval(sx, sy, 17, 15, 16), FILAMENT, seed + 1210, { width: 3.2, wobble: 0.3 });
+      for (let r = 6; r < 15; r += 3.5) { c.beginPath(); c.arc(sx, sy, r, 0, Math.PI * 2); c.strokeStyle = 'rgba(0,0,0,.18)'; c.lineWidth = 1; c.stroke(); }
+      part(c, oval(sx, sy, 5.5, 5.5, 10), '#E9E4DA', seed + 1211, { width: 2.2, wobble: 0.2 });
+      dot(c, sx + Math.cos(turn2) * 2.6, sy + Math.sin(turn2) * 2.6, 1.4, INK);
+      stroke(c, [[sx + 14, sy + 4], [px + 24, T - 10], [px + 20, T + 1]], seed + 1212, 2.6, '#E9E4DA');                // the feed tube in
+      part(c, [[L, y + 1, 1], [R, y + 1, 1], [R, T, 1], [L, T, 1]], '#3B404B', seed + 1200, PW);                      // the case
+      const cL = L + 6, cR = R - 6, cT = T + 7, cB = y - 13;                                                           // the chamber, behind the glass
+      c.fillStyle = '#1E222A'; c.beginPath(); c.roundRect(cL, cT, cR - cL, cB - cT, 3); c.fill();
+      if (P.glow) {                                                                                                    // the light inside
+        const g = c.createLinearGradient(0, cT, 0, cB); g.addColorStop(0, 'rgba(255,226,170,.55)'); g.addColorStop(1, 'rgba(255,226,170,.06)');
+        c.fillStyle = g; c.beginPath(); c.roundRect(cL, cT, cR - cL, cB - cT, 3); c.fill();
+      }
+      c.save(); c.beginPath(); c.roundRect(cL, cT, cR - cL, cB - cT, 3); c.clip();
+      const gy = cT + 11, drop = build * 22, bedY = gy + 13 + drop;                                                     // gantry, and the bed below it
+      stroke(c, [[cL + 6, bedY + 2], [cL + 6, cB]], seed + 1201, 2, '#555B66'); stroke(c, [[cR - 6, bedY + 2], [cR - 6, cB]], seed + 1202, 2, '#555B66');
+      part(c, [[cL + 3, bedY], [cR - 3, bedY], [cR - 3, bedY + 4], [cL + 3, bedY + 4]], '#7A808C', seed + 1203, { width: 2, wobble: 0.15 });
+      if (P.spaghetti) spaghetti(c, px, bedY, cL, cR, cB, seed, tick);
+      else if (build > 0) figurine(c, px, bedY, 0.62, build, seed);
+      stroke(c, [[cL - 2, gy], [cR + 2, gy]], seed + 1204, 3, '#9AA0AC');                                              // the gantry rail
+      const hx = px + (P.nozzle || 0) * 16;
+      part(c, [[hx - 7, gy - 6, 1], [hx + 7, gy - 6, 1], [hx + 7, gy + 6, 1], [hx - 7, gy + 6, 1]], '#E9E4DA', seed + 1205, { width: 2.4, wobble: 0.2 });   // toolhead
+      part(c, [[hx - 2.5, gy + 6], [hx + 2.5, gy + 6], [hx, gy + 11]], '#C9A15B', seed + 1206, { width: 1.6, wobble: 0.1 });                            // nozzle
+      if (P.spaghetti) part(c, oval(hx, gy + 12, 5, 4, 8), SPAG, seed + 1207, { width: 1.6, wobble: 0.4 });            // a blob on the nozzle
+      c.restore();
+      c.save(); c.globalAlpha = 0.22; c.fillStyle = '#CFE8FF';                                                         // a sheen on the glass
+      c.beginPath(); c.moveTo(cL + 6, cB); c.lineTo(cL + 20, cT); c.lineTo(cL + 27, cT); c.lineTo(cL + 13, cB); c.closePath(); c.fill(); c.restore();
+      stroke(c, [[R - 9, cT + 18], [R - 9, cT + 30]], seed + 1208, 2.6, '#9AA0AC');                                     // the door handle
+      c.fillStyle = '#12151B'; c.beginPath(); c.roundRect(L + 8, y - 9, 22, 6, 2); c.fill();                           // the little screen
+      c.fillStyle = P.spaghetti ? '#E8454B' : '#6EE7B7'; c.beginPath(); c.roundRect(L + 9, y - 8, Math.max(1.5, 20 * (P.spaghetti ? 1 : P.held || P.shelf ? 1 : build)), 4, 1.5); c.fill();
+      if (P.spaghetti) {                                                                                               // a strand down the front, out of the door
+        stroke(c, [[px - 4, cB - 2], [px - 8, cB + 6], [px - 2, y - 2], [px + 6, y + 2], [px + 16, y + 1]], seed + 1209, 2.2, SPAG);
+      }
+      if (P.held && P.armR) {                                                                                          // the finished print, held up in his right paw
+        figurine(c, P.armR[0] + (P.x || 0), P.armR[1] + (P.y || 0) - 4, P.held === 2 ? 1.25 : 1, 1, seed + 50);
+      }
+      if (P.shelf) figurine(c, 212 + (P.x || 0) * 0.3, 201, 0.9, 1, seed + 60);                                         // set down beside him
+    },
     moon(c, P, a, seed) {
       c.save(); c.beginPath(); c.arc(48, 46, 18, 0, Math.PI * 2); c.fillStyle = '#FFE9A8'; c.fill();
       c.beginPath(); c.arc(56, 40, 16, 0, Math.PI * 2); c.globalCompositeOperation = 'destination-out'; c.fill(); c.restore();
@@ -553,6 +640,40 @@
     if (fx === 'swag') for (let k = 0; k < 3; k++) { const a = -0.6 + k * 0.6, r = 96 + (Math.floor(tick / 3) + k) % 2 * 6; text(c, '✦', x + Math.cos(a) * r, 104 + Math.sin(a) * r * 0.6, 11 + (k % 2) * 4, 0, '#FFD23F'); }
     if (fx === 'notes') for (let k = 0; k < 2; k++) { const ph = (t * 0.8 + k * 0.5) % 1; c.save(); c.globalAlpha = 1 - ph; text(c, k ? '♫' : '♪', x - 56 + k * 116, 96 - ph * 40, 18, 0); c.restore(); }
     if (fx === 'wub') { const s = 1 + (tick % 3) * 0.15; text(c, 'WUB', x + (tick % 2 ? -50 : 50), 50 + (tick % 2) * 6, 22 * s, tick % 2 ? -0.2 : 0.2, '#5AB8FF'); }
+  }
+  // The print: a little fox-head figurine in teal filament, with its layer lines. Drawn from its base (x, base) up,
+  // only the bottom `upto` of it (0..1) while it's still printing.
+  const FILAMENT = '#38B6A8', SPAG = '#38B6A8';
+  function figurine(c, x, base, k, upto, seed) {
+    const H = 30 * k, top = base - H;
+    const shape = [[x - 11 * k, base, 1], [x + 11 * k, base, 1], [x + 11 * k, base - 4 * k, 1], [x + 13 * k, base - 14 * k],
+      [x + 14 * k, top + 2 * k], [x + 6 * k, base - 22 * k], [x, base - 20 * k], [x - 6 * k, base - 22 * k], [x - 14 * k, top + 2 * k], [x - 13 * k, base - 14 * k],
+      [x - 11 * k, base - 4 * k, 1]];
+    c.save(); c.beginPath(); c.rect(x - 30 * k, base - H * upto - 1, 60 * k, H * upto + 2); c.clip();
+    part(c, shape, FILAMENT, seed + 1240, { width: 2.2, wobble: 0.2 });
+    c.strokeStyle = 'rgba(0,0,0,.16)'; c.lineWidth = 1;
+    for (let ly = base - 2.5; ly > top; ly -= 2.5 * Math.max(0.8, k)) { c.beginPath(); c.moveTo(x - 14 * k, ly); c.lineTo(x + 14 * k, ly); c.stroke(); }
+    if (upto >= 1) { dot(c, x - 4.5 * k, base - 12 * k, 1.5 * k, INK); dot(c, x + 4.5 * k, base - 12 * k, 1.5 * k, INK); dot(c, x, base - 8.5 * k, 1.3 * k, INK); }
+    c.restore();
+  }
+  // spaghetti: a loose tangle of filament on the bed, the print knocked over in the middle of it
+  function spaghetti(c, x, bed, L, R, B, seed, tick) {
+    figurine(c, x + 8, bed, 0.5, 0.35, seed + 70);
+    c.strokeStyle = ink(); c.lineWidth = 3.4; c.lineCap = 'round';
+    const loops = [];
+    for (let k = 0; k < 9; k++) {
+      const cx = x - 16 + F.rnd(seed + 71, k) * 32, cy = bed - 4 - F.rnd(seed + 72, k) * 16, r = 4 + F.rnd(seed + 73, k) * 6;
+      loops.push([cx, cy, r, F.rnd(seed + 74, k) * 6]);
+    }
+    for (const pass of [0, 1]) for (const [cx, cy, r, ph] of loops) {
+      c.beginPath();
+      for (let t = 0; t <= 1.001; t += 0.05) {
+        const an = ph + t * Math.PI * 2.4, wob2 = Math.sin(an * 3 + tick * 0.05) * 1.2;
+        const px = cx + Math.cos(an) * (r + wob2), py = cy + Math.sin(an) * (r * 0.6 + wob2);
+        t ? c.lineTo(px, py) : c.moveTo(px, py);
+      }
+      c.strokeStyle = pass ? SPAG : ink(); c.lineWidth = pass ? 1.8 : 3.4; c.stroke();
+    }
   }
   // crumpled paper: a lumpy ball with a couple of creases
   function crumple(c, x, y, seed) {

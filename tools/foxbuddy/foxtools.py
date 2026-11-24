@@ -181,6 +181,59 @@ def activity(args, dirs):
     return "\n\n".join(out)
 
 
+# ---------- 3D printer (--printer): the bridge listens to a Bambu Lab printer and keeps its latest status here ----------
+PRINTER_FILE = os.path.expanduser("~/.desk-buddy/printer.json")
+PRINTER_STATES = {"IDLE": "idle", "PREPARE": "getting ready to print", "SLICING": "slicing", "RUNNING": "printing",
+                  "PAUSE": "paused", "FINISH": "finished", "FAILED": "stopped (failed or cancelled)"}
+
+
+def printer(args, path=PRINTER_FILE, now=None):
+    now = now or time.time()
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return "No status from the printer yet. If it was just set up, give it a minute; it has to be on and on the same network."
+    conn = d.get("connection") or "off"
+    if conn == "off":
+        return "No 3D printer is set up. Right-click › 3D Printer › Set Up Printer… sets one up."
+    name = d.get("name") or "The printer"
+    heard = d.get("heard")
+    when = datetime.fromtimestamp(heard).strftime("%a %-I:%M %p") if isinstance(heard, (int, float)) else None
+    lines = []
+    if conn != "connected":
+        lines.append(f"{name} isn't connected right now ({conn})." + (f" Last heard from it {when}; this is what it said then." if when else ""))
+    state = str(d.get("state") or "").upper()
+    if not state:
+        return "\n".join(lines + ["No print status yet."])
+    job = d.get("job")
+    line = f"{name}: {PRINTER_STATES.get(state, state.lower())}" + (f" \"{job}\"" if job else "")
+    pct, rem, layer, total = d.get("percent"), d.get("remaining_min"), d.get("layer"), d.get("total_layers")
+    if state in ("RUNNING", "PAUSE", "PREPARE"):
+        if isinstance(pct, (int, float)):
+            line += f", {int(pct)}% done"
+        if isinstance(layer, int) and isinstance(total, int) and total:
+            line += f", layer {layer} of {total}"
+        if isinstance(rem, (int, float)) and rem > 0 and state == "RUNNING":
+            h, m = divmod(int(rem), 60)
+            done_at = datetime.fromtimestamp((heard if isinstance(heard, (int, float)) else now) + rem * 60).strftime("%-I:%M %p")
+            line += f", about {f'{h} h {m:02d} min' if h else f'{m} min'} to go (done around {done_at})"
+    if isinstance(d.get("started"), (int, float)) and state in ("RUNNING", "PAUSE", "FINISH"):
+        line += ". Started " + datetime.fromtimestamp(d["started"]).strftime("%a %-I:%M %p")
+    lines.append(line + ".")
+    if d.get("error"):
+        lines.append(f"Error code {d['error']} (Bambu's HMS code: the printer's screen and the Bambu Handy app explain it).")
+    temps = [f"{k} {int(v)}°C" for k, v in (("nozzle", d.get("nozzle")), ("bed", d.get("bed"))) if isinstance(v, (int, float))]
+    if temps and state in ("RUNNING", "PAUSE", "PREPARE"):
+        lines.append("Temperatures: " + ", ".join(temps) + ".")
+    return "\n".join(lines)
+
+
+PRINTER_TOOL = {"name": "printer",
+                "description": "The user's 3D printer (a Bambu Lab printer on their network): what it's doing now, the job's name, "
+                               "percent done, layer, time left and any error. Use it for any question about their print or printer.",
+                "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}}
+
 TOOLS = [
     {"name": "find_files",
      "description": "Find files and folders BY NAME in the folders the user allowed (it never reads inside files). "
@@ -616,7 +669,7 @@ def main(argv):
         if not ok:
             sys.stderr.write(why + "\n")
         sys.exit(0 if ok else 2)                                  # exit 2: Claude Code blocks the call and tells him why
-    roots, dirs, apple, guide, settings, spark = [], [], False, None, None, None
+    roots, dirs, apple, guide, settings, spark, has_printer = [], [], False, None, None, None, False
     it = iter(argv)
     for a in it:
         if a == "--folder":
@@ -627,6 +680,8 @@ def main(argv):
             dirs.append(real(next(it, "")))
         elif a == "--apple":
             apple = True
+        elif a == "--printer":
+            has_printer = True
         elif a == "--spark":
             p = next(it, "")
             if os.path.isabs(p) and os.access(p, os.X_OK):
@@ -656,7 +711,7 @@ def main(argv):
                 "protocolVersion": params.get("protocolVersion") or "2025-06-18",
                 "capabilities": {"tools": {}}, "serverInfo": {"name": "fox", "version": "1.0"}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS + (APPLE_TOOLS if apple else []) + (SPARK_TOOLS if spark else [])}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS + (APPLE_TOOLS if apple else []) + (SPARK_TOOLS if spark else []) + ([PRINTER_TOOL] if has_printer else [])}})
         elif method == "tools/call":
             name, args = params.get("name"), params.get("arguments") or {}
             try:
@@ -664,6 +719,8 @@ def main(argv):
                     text = find_files(args, roots) if roots else "The user hasn't allowed any folders."
                 elif name == "activity":
                     text = activity(args, dirs)
+                elif name == "printer" and has_printer:
+                    text = printer(args)
                 elif name == "about_fox_buddy":
                     text = about(guide, settings)
                 elif apple and name in APPLE_READ + APPLE_CHANGE:

@@ -266,6 +266,31 @@ release published on its own counts too. He checks every 5 minutes (every 2 whil
 GitHub's public API without signing in, so private repositories don't work. Check Now looks right away;
 Stop Watching removes one.
 
+## 3D Printer (Bambu Lab)
+
+He can watch a Bambu Lab 3D printer (P1S, P1P, A1, X1 and the like) on the same network: right-click › 3D
+Printer › Set Up Printer…, then the printer's IP address and Access Code (on the printer's screen under
+Settings › WLAN or Network) and its serial number (Settings › Device). The Access Code is saved only on this
+Mac (in ~/.desk-buddy/config.json, readable only by the user) and is never sent anywhere but the printer.
+
+- When a print finishes, he holds the finished print up and celebrates, and says which print it was and
+  how long it took. When one fails, he looks at the spaghetti in horror and says it failed and at what
+  percent. When the printer pauses itself with an error (a filament runout, a clog), he says it needs them,
+  with the error code (the printer's screen and the Bambu Handy app explain the code). A print they cancel
+  themselves just gets a one-line note.
+- right-click › 3D Printer › How's My Print? says what it's doing right now (the print's name, percent,
+  time left), with no Claude needed. In chat, ask "how's my print?" or "when will it be done?" and he
+  answers from his printer tool, sitting by his little printer while he checks.
+- He only listens: he never sends the printer commands, so he can't start, pause or stop prints, and it
+  works without the printer's Developer Mode or LAN Only Mode. Bambu Studio, Bambu Handy and the cloud keep
+  working as before.
+- If he can't reach it: the printer has to be on and on the same network as the Mac, and its IP address
+  can change (a reserved address in the router stops that); right-click › 3D Printer › Change Printer…
+  updates it. "Turned down the access code" means the code changed (it can, after a reset): re-enter it.
+  "The printer's certificate changed" means something else answered at that address, or the printer was
+  reset; if it's the same printer, set it up again.
+- Stop Watching the Printer removes it and its settings. One printer at a time.
+
 ## Site Checks
 
 He can keep an eye on websites: right-click › Site Checks › Watch a Website… (an address like example.com).

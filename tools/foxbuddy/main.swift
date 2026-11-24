@@ -623,6 +623,7 @@ struct FoxSetup {
     var calendarState = "unknown"
     var apple = true                    // Reminders, Notes and Shortcuts (Setup › Use Reminders, Notes & Shortcuts)
     var spark: String?                  // the `spark` command (Spark Mail), if it's installed and switched on (Setup › Use Spark Mail)
+    var printer = false                 // a 3D printer set up (config.json "printer", right-click › 3D Printer): his printer tool
 
     static func load() -> FoxSetup {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -650,6 +651,7 @@ struct FoxSetup {
             setup.calendarState = found["calendar"]?["state"] ?? "missing"
         }
         setup.extras = ExtraServer.load(home: home, reserved: ["foxbuddy", setup.gmail, setup.calendar])
+        setup.printer = ((cfg["printer"] as? [String: Any])?["host"] as? String).map { !$0.isEmpty } ?? false
         let prefs = UserDefaults.standard
         if let n = prefs.string(forKey: "foxName"), !n.isEmpty { setup.foxName = n }
         if let st = prefs.string(forKey: "style"), ["facts", "wit", "comedian"].contains(st) { setup.style = st }
@@ -990,7 +992,7 @@ final class Asker {
         - Files: find files and folders by name with the foxbuddy find_files tool, in \(folders). When you mention a file, \
         give its full path in backticks (`/Users/...`) so the user gets a "Show in Finder" button. \
         \(readFiles ? "The user has switched files to \"can open\" for this chat, so you may also read files in those folders with Read." : "You can see names only, not what's inside files. If you'd need to look inside one, tell the user to click \"Files: names only\" under the chat to let you open files.")\(attached.isEmpty ? "" : " The user dropped these files on you for this chat, and you may open them with Read (PDFs, documents, text, CSVs and images all work), even outside their folders: " + attached.map { "`\($0)`" }.joined(separator: ", ") + ". When they say \"this\" or \"the file\", they mean these.")
-        - Activity: the user's recent steps, workouts and so on, from the foxbuddy activity tool.\(setup.extras.compactMap { $0.about.map { "\n- " + $0 } }.joined())
+        - Activity: the user's recent steps, workouts and so on, from the foxbuddy activity tool.\(setup.printer ? "\n- 3D printer: the user's Bambu Lab printer, with the foxbuddy printer tool: what it's printing, how far along, time left, errors. You can't control it (no pausing or starting prints). It already tells them by itself when a print finishes or fails." : "")\(setup.extras.compactMap { $0.about.map { "\n- " + $0 } }.joined())
         - Yourself: for any question about Fox Buddy (what you can or can't do, how to set something up or switch it off, \
         where a setting is, privacy, why something isn't working, or what their settings are now), call the foxbuddy \
         about_fox_buddy tool first and answer from it, giving menu paths exactly as it does. Never guess about your own \
@@ -1088,6 +1090,7 @@ final class Asker {
         var allowed: [String] = ["WebSearch", "mcp__foxbuddy__find_files", "mcp__foxbuddy__activity", "mcp__foxbuddy__about_fox_buddy"]
         if setup.apple { allowed += APPLE_READ.map { "mcp__foxbuddy__" + $0 } }
         if setup.spark != nil { allowed += SPARK_READ.map { "mcp__foxbuddy__" + $0 } }
+        if setup.printer { allowed.append("mcp__foxbuddy__printer") }
         for x in setup.extras { allowed += x.allowed }            // your own extra tools (fox-tools.json)
         allowed += GMAIL_READ.map { gm + $0 }
         allowed += CALENDAR_READ.map { cal + $0 }
@@ -1121,6 +1124,7 @@ final class Asker {
         for d in setup.activityDirs { foxArgs += ["--activity-dir", d] }
         if setup.apple { foxArgs.append("--apple") }
         if let sp = setup.spark { foxArgs += ["--spark", sp] }
+        if setup.printer { foxArgs.append("--printer") }
         // His guide to himself (fox-guide.md, next to foxtools.py) and your current settings, for about_fox_buddy.
         foxArgs += ["--guide", URL(fileURLWithPath: foxtools).deletingLastPathComponent().appendingPathComponent("fox-guide.md").path,
                     "--settings", Asker.settingsFile.path]
@@ -1788,6 +1792,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Wander Around", [item("Wander Around Now and Then", #selector(toggleWander), on: wanderOn),
                                         item("Go Sit on My Window", #selector(wanderNow))]))
         m.addItem(sub("Stretch Breaks", moveItems()))
+        m.addItem(sub("3D Printer", printerItems()))
         m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(sub("Site Checks", siteItems()))
         m.addItem(item("Mac Housekeeping", #selector(toggleHousekeeping), on: housekeeping))
@@ -2293,6 +2298,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         guard let data = json.data(using: .utf8), let n = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let text = n["text"] as? String, !text.isEmpty else { return }
         let kind = (n["kind"] as? String) ?? "info"
+        // A scene to play for a while (the bridge's printer alerts: printdone, printfail), whatever the bubble does.
+        if let h = n["hold"] as? [String: Any], let mood = h["mood"] as? String, mood.range(of: #"^[a-z]{1,20}$"#, options: .regularExpression) != nil {
+            js("desk.hold('\(mood)', \(min(max((h["ms"] as? Int) ?? 30000, 1000), 120000)))")
+        }
         if narrate == "off" { return }
         if narrate == "important" && kind == "working" {
             if bubbleMode == "say" && bubbleKind == "needs" { hideBubble() }      // Claude's moving again: that's been dealt with
@@ -2818,6 +2827,89 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         guard let m = s.representedObject as? Int else { return }
         moveEvery = m; activeSince = 0
         say(m == 0 ? "No more stretch reminders." : "After \(m == 60 ? "an hour" : m == 90 ? "90 minutes" : "2 hours") at it without a break, I'll suggest a stretch.")
+    }
+
+    // MARK: 3D printer
+
+    /// A Bambu Lab printer on your network (config.json "printer": host, serial, access_code, name). The bridge listens
+    /// to it (read-only, no Developer Mode needed) and tells him when a print finishes, fails or pauses with an error;
+    /// it keeps the latest status in ~/.desk-buddy/printer.json, which "How's My Print?" and his chat read.
+    static let printerFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".desk-buddy/printer.json")
+    var printerConfig: [String: Any]? {
+        let c = (try? JSONSerialization.jsonObject(with: Data(contentsOf: Setup.runtime.appendingPathComponent("config.json")))) as? [String: Any]
+        return c?["printer"] as? [String: Any]
+    }
+    func setPrinter(_ p: [String: Any]?) {
+        let url = Setup.runtime.appendingPathComponent("config.json")
+        var c = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any]) ?? [:]
+        c["printer"] = p
+        if let d = try? JSONSerialization.data(withJSONObject: c, options: [.prettyPrinted]) {
+            FileManager.default.createFile(atPath: url.path, contents: d, attributes: [.posixPermissions: 0o600])   // the access code: yours alone
+        }
+        try? FileManager.default.removeItem(at: Setup.runtime.appendingPathComponent("printer-pin.json"))      // a new printer: learn its certificate again
+    }
+    func printerItems() -> [NSMenuItem] {
+        guard printerConfig != nil else { return [item("Set Up Printer…", #selector(setUpPrinter))] }
+        return [item("How's My Print?", #selector(printerStatus)), .separator(),
+                item("Change Printer…", #selector(setUpPrinter)), item("Stop Watching the Printer", #selector(removePrinter))]
+    }
+    @objc func setUpPrinter() {
+        let a = NSAlert()
+        a.messageText = "Which printer should I watch?"
+        a.informativeText = "A Bambu Lab printer on this network. On the printer's screen: Settings › WLAN (or Network) shows its IP address and Access Code; Settings › Device shows the serial number. I only listen: I'll tell you when a print finishes, fails or stops with an error, and I never send it commands."
+        let p = printerConfig ?? [:]
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 120))       // four fields, top to bottom
+        func field(_ row: Int, _ ph: String, _ v: Any?, secure: Bool = false) -> NSTextField {
+            let r = NSRect(x: 0, y: CGFloat(96 - row * 32), width: 300, height: 24)
+            let f = secure ? NSSecureTextField(frame: r) : NSTextField(frame: r)
+            f.placeholderString = ph; f.stringValue = v as? String ?? ""; box.addSubview(f); return f
+        }
+        let host = field(0, "IP address, like 192.168.1.50", p["host"]), serial = field(1, "Serial number", p["serial"])
+        let code = field(2, "Access Code (8 characters)", p["access_code"], secure: true)
+        let name = field(3, "A name for it (optional), like P1S", p["name"])
+        host.nextKeyView = serial; serial.nextKeyView = code; code.nextKeyView = name
+        a.accessoryView = box; a.addButton(withTitle: "Watch It"); a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        a.window.initialFirstResponder = host
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let h = host.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let s = serial.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let c = code.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let n = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard h.range(of: #"^[A-Za-z0-9.\-:]{1,100}$"#, options: .regularExpression) != nil,
+              s.range(of: #"^[A-Z0-9]{6,32}$"#, options: .regularExpression) != nil,
+              c.range(of: #"^[A-Za-z0-9]{4,32}$"#, options: .regularExpression) != nil else {
+            say("Something in there doesn't look right: the IP address, serial number and access code are all on the printer's screen. Try again from 3D Printer in my menu."); return
+        }
+        setPrinter(["host": h, "serial": s, "access_code": c, "name": n.isEmpty ? "your printer" : String(n.prefix(40))])
+        say("Watching \(n.isEmpty ? "your printer" : n). When a print finishes or fails, I'll let you know. Ask me \"how's my print?\" any time.")
+    }
+    @objc func removePrinter() {
+        setPrinter(nil)
+        say("I've stopped watching the printer. Its settings are gone from this Mac.")
+    }
+    /// Straight from printer.json, no Claude needed (so it works in Just the Fox too). He plays the printer act while he says it.
+    @objc func printerStatus() {
+        let d = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: App.printerFile))) as? [String: Any]) ?? [:]
+        let name = d["name"] as? String ?? "The printer", state = (d["state"] as? String ?? "").uppercased(), job = d["job"] as? String ?? ""
+        let what = job.isEmpty ? "" : " **\(job)**"
+        var text: String
+        switch state {
+        case "RUNNING", "PREPARE":
+            text = "\(name) is printing\(what)"
+            if let pct = d["percent"] as? Int { text += ": \(pct)% done" }
+            if let rem = d["remaining_min"] as? Int, rem > 0 { text += ", about " + (rem >= 60 ? "\(rem / 60) h \(rem % 60) min" : "\(rem) min") + " to go" }
+            text += "."
+        case "PAUSE": text = "\(name) is paused\(what)" + ((d["error"] as? String).map { " with error \($0)" } ?? "") + "."
+        case "FINISH": text = "\(name) finished\(what). It's waiting for you to take it off the plate."
+        case "FAILED": text = "\(name) stopped\(what) before the end."
+        case "IDLE": text = "\(name) is idle. Nothing printing."
+        default: text = "I haven't heard from \(name) yet."
+        }
+        if let conn = d["connection"] as? String, conn != "connected", !state.isEmpty { text = "I can't reach \(name) right now (\(conn)). Last I heard: " + text }
+        js("desk.act('printer'); desk.hold('working', 12000)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in self?.js("desk.act(null)") }
+        say(text)
     }
 
     // MARK: ship watcher
@@ -4567,8 +4659,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         App.MONEY.firstMatch(in: q, range: NSRange(q.startIndex..., in: q)) != nil
     }
 
+    /// Questions about the 3D printer get the printer act (and the bridge switches to it when he uses his printer tool).
+    static let PRINTER_WORDS = try! NSRegularExpression(pattern: #"\b(3d|printer|printing|prints?|bambu|p1s|filament|nozzle|spool)\b"#, options: [.caseInsensitive])
+    func looksLikePrinter(_ q: String) -> Bool {
+        FoxSetup.load().printer && App.PRINTER_WORDS.firstMatch(in: q, range: NSRange(q.startIndex..., in: q)) != nil
+    }
+
     func askFox(_ question: String, approved: Approval? = nil) {
-        if approved == nil && looksLikeMoney(question) { js("desk.act('accountant')") }
+        if approved == nil && looksLikePrinter(question) { js("desk.act('printer')") }
+        else if approved == nil && looksLikeMoney(question) { js("desk.act('accountant')") }
         asker.ask(question, approved: approved) { [weak self] text, ok in
             guard let self = self else { return }
             self.js("desk.act(null)")                  // (he finishes the act's round, then goes back to the usual rotation)

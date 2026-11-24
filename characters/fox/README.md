@@ -11,7 +11,8 @@ repository's MIT license (see `LICENSE`).
 
 ## What he does
 
-He has 10 moods, which the bridge picks from what Claude is doing:
+He has 10 moods, which the bridge picks from what Claude is doing (plus a few scenes the app shows for a
+while: flag, boombox, hop, and the 3D printer's printdone and printfail):
 
 - **asleep**: dozing upright
 - **night**: curled up under his own tail
@@ -19,6 +20,12 @@ He has 10 moods, which the bridge picks from what Claude is doing:
   - **accountant**: green visor, an adding machine with paper tape that spools longer and longer
   - **typewriter**: a typewriter that dings; he rips out the page, crumples it and tosses it
   - **mad scientist**: goggles and two bubbling flasks; one brew explodes, one is a eureka
+  - **3D printer** (on its own, not in the rotation: for questions about the printer): a little enclosed
+    printer with a spool on top, the toolhead zipping back and forth, the bed dropping a layer at a time as
+    a fox-head figurine grows; chin on his paws, leaning in for the last layers, then a ding, and he lifts
+    the print out, holds it up and sets it down
+- **printdone**: holding the fresh print up in one paw, bouncing, sparkles
+- **printfail**: spaghetti in the printer and a strand down the front; paws to his cheeks, then a facepalm
 - **long haul**: the same three acts, frazzled, with the mess piling up (tape on the floor, a heap
   of paper balls, singed fur) and a growing stack of coffee cups
 - **needs you**: waving

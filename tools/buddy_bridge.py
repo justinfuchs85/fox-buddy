@@ -32,6 +32,10 @@ of your VIPs makes him hold up a letter until Slack says you've read it (or half
 any other DM, or a message that @-mentions you, sends a paper plane looping round him, once.
 Channel traffic that doesn't tag you is never looked at, and "needs you" from Claude always wins.
 
+A Bambu Lab 3D printer (class PrinterWatch, config.json "printer"): listened to on the local network; when a
+print finishes he celebrates with it, when one fails or pauses with an error he looks at the mess, and he
+says so in his bubble. Read-only: it never sends the printer a command.
+
 Optional sounds play on the Mac's speakers (class Sounds): WAVs you put in ~/.desk-buddy/sounds, with
 which moments make a sound in ~/.desk-buddy/sounds.json ("enabled" is the master switch, off by default).
 Fox Buddy ships no sounds: he's silent.
@@ -1049,7 +1053,9 @@ class Buddy:
             act_line = None
             if os.path.realpath(s.get("cwd") or "/") == os.path.realpath(QUICK_ASK_DIR):
                 m = re.match(r"mcp__([A-Za-z0-9_-]+)__", str(p.get("tool_name") or ""))
-                act = fox_acts().get(m.group(1)) if m and ev == "PreToolUse" else None
+                act = None
+                if m and ev == "PreToolUse":
+                    act = "printer" if p.get("tool_name") == "mcp__foxbuddy__printer" else fox_acts().get(m.group(1))
                 if act and s.get("act") != act:
                     s["act"] = act; act_line = "a " + act
                 elif ev in ("Stop", "StopFailure", "SessionEnd") and s.pop("act", None):
@@ -1641,6 +1647,7 @@ class Buddy:
                               "app_pages": sorted(getattr(getattr(self, "app", None), "visible", []))},
                     "app_watcher": None if not app or not app.seen else {"trusted": app.trusted, "last_report_s": int(now - app.seen)},
                     "browser_watcher": None if not getattr(self, "browser", None) or not self.browser.seen else {"last_report_s": int(now - self.browser.seen)},
+                    "printer": getattr(getattr(self, "printer", None), "status", None),
                     "slack": {"letters": {v.get("from"): int(now - v["since"]) for v in self.letters_locked(now).values()},
                               "watch": getattr(getattr(self, "slack", None), "status", None)},
                     "sessions": {(k if k.startswith(("app:", "web:")) else k[:8]): {"state": v["state"], "age_s": int(now - v["t"]), "cwd": v["cwd"],
@@ -1962,6 +1969,309 @@ class SlackWatch:
             self.buddy.slack_plane(plane[1], plane[0])
 
 
+# ---------- a Bambu Lab printer (class PrinterWatch) ----------
+# config.json "printer": {"host": "192.168.1.50", "serial": "01P00A...", "access_code": "12345678", "name": "P1S"}
+# (Fox Buddy's right-click › 3D Printer sets it). The printer reports its status over MQTT on the local network
+# (TLS, port 8883, user "bblp", the LAN access code as the password). This only listens: it never sends the
+# printer a command, so it works without Developer Mode. The access code is never logged.
+PRINTER_FILE = os.path.join(HOME, "printer.json")       # the latest status, for his chat's printer tool
+PRINTER_PIN = os.path.join(HOME, "printer-pin.json")     # the printer's certificate, remembered the first time
+PRINTER_PORT = 8883
+PRINTER_PING = 30                                       # MQTT keepalive
+PRINTER_QUIET = 120                                     # nothing heard this long: reconnect
+PRINTER_RETRY = (30, 60, 120, 300)                      # printer off or asleep: try again, more slowly
+PRINTER_HOLD_MS = 30000                                 # how long he plays the done / failed scene
+PRINTER_ACTIVE = {"PREPARE", "SLICING", "RUNNING", "PAUSE"}
+PRINTER_CANCELLED = "0300_400C"                         # Bambu's "the task was canceled": you stopped it yourself
+PRINTER_CATCHUP = 12 * 3600                             # a print that ended while the bridge was down: still tell, if this recent
+
+
+class PrinterError(Exception):
+    pass
+
+
+def mqtt_str(s):
+    b = s.encode()
+    return len(b).to_bytes(2, "big") + b
+
+
+def mqtt_packet(kind, body):
+    n, out = len(body), bytearray([kind])
+    while True:                                         # the remaining length, 7 bits at a time
+        byte, n = n % 128, n // 128
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out) + body
+
+
+class PrinterWatch:
+    """Listens to one Bambu Lab printer on your network and tells the fox when a print finishes, fails, or
+    pauses itself with an error (a filament runout, say). Read-only: it subscribes to the printer's reports
+    and asks once per connection for a full one; it never sends the printer anything else.
+
+    The printer's TLS certificate is its own (signed by Bambu's private CA), so it can't be checked the usual
+    way: the first connection remembers it (printer-pin.json) and later ones must match, so nothing else on
+    the network can pose as the printer and collect the access code. Setting the printer up again in Fox Buddy
+    forgets it. Status goes to printer.json for his chat; the access code never leaves config.json."""
+
+    def __init__(self, buddy, start=True, wrap=None):
+        self.buddy, self.wrap = buddy, wrap or self._tls
+        self.data, self.cfg_key, self.status, self.sock = {}, None, "off", None
+        self.last = self._load_last()                   # what we last knew about the job: survives a restart
+        self.written = 0.0
+        if start:
+            threading.Thread(target=self._run, daemon=True).start()
+
+    # ---- settings ----
+    @staticmethod
+    def config():
+        p = read_config().get("printer")
+        if not isinstance(p, dict):
+            return None
+        host, serial, code = str(p.get("host") or "").strip(), str(p.get("serial") or "").strip().upper(), str(p.get("access_code") or "").strip()
+        if not (re.fullmatch(r"[A-Za-z0-9.\-:]{1,100}", host) and re.fullmatch(r"[A-Z0-9]{6,32}", serial) and re.fullmatch(r"[A-Za-z0-9]{4,32}", code)):
+            return None
+        name = " ".join(str(p.get("name") or "").split())[:40] or "your printer"
+        return {"host": host, "serial": serial, "code": code, "name": name}
+
+    def _load_last(self):
+        try:
+            with open(PRINTER_FILE) as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    # ---- the connection ----
+    def _tls(self, sock, cfg):
+        import hashlib, ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE      # the printer's own CA: pinned below instead
+        s = ctx.wrap_socket(sock)
+        fp = hashlib.sha256(s.getpeercert(binary_form=True) or b"").hexdigest()
+        key = cfg["host"] + "|" + cfg["serial"]
+        try:
+            with open(PRINTER_PIN) as f:
+                pins = json.load(f)
+        except (OSError, ValueError):
+            pins = {}
+        if pins.get(key) and pins[key] != fp:
+            s.close()
+            raise PrinterError("the printer's certificate changed: set the printer up again in Fox Buddy if that's expected")
+        if not pins.get(key):
+            pins = {key: fp}                                             # one printer: forget any old one
+            tmp = PRINTER_PIN + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(pins, f)
+            os.replace(tmp, PRINTER_PIN)
+        return s
+
+    def _read(self, n):
+        out = b""
+        while len(out) < n:
+            chunk = self.sock.recv(n - len(out))
+            if not chunk:
+                raise PrinterError("the printer closed the connection")
+            out += chunk
+        return out
+
+    def _packet(self):
+        """One MQTT packet: (type, body). socket.timeout if nothing's waiting."""
+        head = self._read(1)[0]
+        n, mult = 0, 1
+        for _ in range(4):
+            b = self._read(1)[0]
+            n += (b & 0x7F) * mult
+            if not b & 0x80:
+                break
+            mult *= 128
+        if n > 4_000_000:
+            raise PrinterError("an oversized message")
+        return head, self._read(n) if n else b""
+
+    def session(self, cfg):
+        """Connect, subscribe, ask for a full report, then listen until something goes wrong or the settings change."""
+        raw = socket.create_connection((cfg["host"], PRINTER_PORT), timeout=10)
+        try:
+            self.sock = self.wrap(raw, cfg)
+        except Exception:
+            raw.close(); raise
+        try:
+            self.sock.settimeout(10)
+            cid = "foxbuddy-%06x" % random.randrange(1 << 24)
+            self.sock.sendall(mqtt_packet(0x10, mqtt_str("MQTT") + bytes([4, 0xC2]) + (PRINTER_PING * 2).to_bytes(2, "big")
+                                          + mqtt_str(cid) + mqtt_str("bblp") + mqtt_str(cfg["code"])))
+            kind, body = self._packet()
+            if kind >> 4 != 2 or len(body) < 2:
+                raise PrinterError("the printer didn't answer like an MQTT server")
+            if body[1] in (4, 5):
+                raise PrinterError("the printer turned down the access code: check it on the printer's screen")
+            if body[1]:
+                raise PrinterError("the printer refused the connection (%d)" % body[1])
+            self.sock.sendall(mqtt_packet(0x82, (1).to_bytes(2, "big") + mqtt_str("device/%s/report" % cfg["serial"]) + b"\x00"))
+            self.sock.sendall(mqtt_packet(0x30, mqtt_str("device/%s/request" % cfg["serial"])
+                                          + json.dumps({"pushing": {"sequence_id": "0", "command": "pushall"}}).encode()))
+            self.set_status("connected"); self.data = {}
+            log.info("printer: connected to %s", cfg["name"])
+            self.sock.settimeout(5)
+            heard = pinged = time.time()
+            while self.config() == cfg:
+                now = time.time()
+                if now - pinged >= PRINTER_PING:
+                    self.sock.sendall(b"\xC0\x00"); pinged = now
+                if now - heard > PRINTER_QUIET:
+                    raise PrinterError("the printer went quiet")
+                try:
+                    kind, body = self._packet()
+                except socket.timeout:
+                    continue
+                heard = time.time()
+                if kind >> 4 == 3:                                         # a report
+                    tl = int.from_bytes(body[:2], "big")
+                    payload = body[2 + tl + (2 if (kind >> 1) & 3 else 0):]
+                    try:
+                        msg = json.loads(payload)
+                    except ValueError:
+                        continue
+                    self.report(msg, cfg)
+        finally:
+            try: self.sock.close()
+            except OSError: pass
+            self.sock = None
+
+    def _run(self):
+        fails = 0
+        while True:
+            cfg = self.config()
+            if not cfg:
+                if self.status != "off":
+                    self.set_status("off")
+                time.sleep(15); continue
+            try:
+                self.session(cfg)
+                fails = 0
+            except (OSError, PrinterError) as e:
+                fails += 1
+                why = str(e) if isinstance(e, PrinterError) else "can't reach it (off, asleep, or a different address?)"
+                if self.status != why:
+                    log.info("printer: %s", why)
+                self.set_status(why)
+            except Exception as e:                                        # never kill the loop
+                fails += 1
+                log.info("printer: %s", type(e).__name__)
+                self.set_status("error")
+            wait = PRINTER_RETRY[min(fails, len(PRINTER_RETRY)) - 1] if fails else 5
+            end = time.time() + wait
+            while time.time() < end and self.config() == cfg:              # new settings: try them straight away
+                time.sleep(2)
+
+    def set_status(self, s):
+        self.status = s
+        self.write(force=True)
+
+    # ---- what the printer says ----
+    def report(self, msg, cfg, now=None):
+        p = msg.get("print") if isinstance(msg, dict) else None
+        if not isinstance(p, dict):
+            return
+        now = now or time.time()
+        self.data.update({k: v for k, v in p.items() if k in (
+            "gcode_state", "mc_percent", "mc_remaining_time", "layer_num", "total_layer_num", "subtask_name",
+            "gcode_file", "print_error", "gcode_start_time", "nozzle_temper", "bed_temper", "nozzle_target_temper", "bed_target_temper")})
+        d = self.data
+        state = str(d.get("gcode_state") or "").upper()
+        if not state:
+            return
+        job = self.job_name()
+        last, told = self.last, None
+        was = str(last.get("state") or "").upper()
+        same_job = last.get("job") == job
+        fresh = now - float(last.get("updated") or 0) < PRINTER_CATCHUP
+        err = self.error_code()
+        if state in ("FINISH", "FAILED") and was in PRINTER_ACTIVE and same_job and fresh:
+            told = "CANCELLED" if state == "FAILED" and err == PRINTER_CANCELLED else state
+        elif state == "PAUSE" and err and last.get("told_error") != err and (was in PRINTER_ACTIVE or not was):
+            told = "PAUSED"                             # paused itself with an error (each error once per pause)
+        self.last = {"state": state, "job": job, "updated": now,
+                     "told_error": err if told == "PAUSED" else (last.get("told_error") if state == "PAUSE" else None),
+                     "started": self.started(now, last, was, state, same_job)}
+        changed = state != was or told
+        self.write(force=bool(changed), now=now)
+        if told:
+            self.tell(told, cfg, now)
+
+    def started(self, now, last, was, state, same_job):
+        try:
+            t = int(self.data.get("gcode_start_time") or 0)
+            if t > 1_500_000_000:
+                return t
+        except (TypeError, ValueError):
+            pass
+        if state in PRINTER_ACTIVE and (was not in PRINTER_ACTIVE or not same_job):
+            return now
+        return last.get("started") if same_job else None
+
+    def job_name(self):
+        j = str(self.data.get("subtask_name") or self.data.get("gcode_file") or "").strip()
+        j = re.sub(r"\.(gcode\.)?3mf$|\.gcode$", "", os.path.basename(j), flags=re.I)
+        return " ".join(j.split())[:60]
+
+    def error_code(self):
+        try:
+            e = int(self.data.get("print_error") or 0)
+        except (TypeError, ValueError):
+            return None
+        return "%04X_%04X" % (e >> 16, e & 0xFFFF) if e else None
+
+    def tell(self, what, cfg, now):
+        job, d = self.job_name(), self.data
+        name = f"**{job}**" if job else "the print"
+        if what == "FINISH":
+            took = ""
+            if self.last.get("started"):
+                mins = int((now - self.last["started"]) // 60)
+                if 0 < mins < 7 * 24 * 60:
+                    took = f" after {mins // 60} h {mins % 60:02d} min" if mins >= 60 else f" after {mins} min"
+            text, kind, mood, sound = f"Done printing {name}{took} on {cfg['name']}. Fresh off the plate.", "done", "printdone", "print_done"
+        elif what == "CANCELLED":
+            log.info("printer: cancelled")
+            self.buddy.narrate(f"{cfg['name']} stopped {name}: it was cancelled.", "info")
+            return
+        else:
+            pct = d.get("mc_percent")
+            at = f" at {int(pct)}%" if isinstance(pct, (int, float)) and 0 < pct < 100 else ""
+            code = self.error_code()
+            if what == "FAILED":
+                text = f"{name[0].upper() + name[1:]} failed{at} on {cfg['name']}." + (f" Error {code}." if code else "") + " Worth a look."
+            else:
+                text = f"{cfg['name']} paused {name}{at} with an error ({code}). It needs you, maybe filament."
+            kind, mood, sound = "needs", "printfail", "print_failed"
+        log.info("printer: %s", what.lower())
+        self.buddy.sound(sound)
+        self.buddy.narrate(text, kind, None, {"hold": {"mood": mood, "ms": PRINTER_HOLD_MS}})
+
+    def write(self, force=False, now=None):
+        now = now or time.time()
+        if not force and now - self.written < 15:
+            return
+        self.written = now
+        d, cfg = self.data, self.config()
+        out = dict(self.last)
+        out.update({"name": cfg["name"] if cfg else None, "connection": self.status, "heard": now if self.status == "connected" else self._load_last().get("heard"),
+                    "percent": d.get("mc_percent"), "remaining_min": d.get("mc_remaining_time"), "layer": d.get("layer_num"),
+                    "total_layers": d.get("total_layer_num"), "error": self.error_code(),
+                    "nozzle": d.get("nozzle_temper"), "bed": d.get("bed_temper")})
+        if not cfg:
+            out = {"connection": "off"}
+        tmp = PRINTER_FILE + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(out, f)
+            os.replace(tmp, PRINTER_FILE)
+        except OSError:
+            pass
+
+
 buddy = None
 
 
@@ -2068,5 +2378,6 @@ if __name__ == "__main__":
     buddy.browser = AppPages(buddy, source="web")
     buddy.calendar = Calendar()
     buddy.slack = SlackWatch(buddy)
+    buddy.printer = PrinterWatch(buddy)
     log.info("desk-buddy bridge listening on 127.0.0.1:%d", HTTP_PORT)
     http.server.ThreadingHTTPServer(("127.0.0.1", HTTP_PORT), Handler).serve_forever()
