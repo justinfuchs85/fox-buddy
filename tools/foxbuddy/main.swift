@@ -2138,7 +2138,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         prefs.set(rel.version, forKey: "updateSkipped")          // mention each version once (Not now means not again)
         bubbleMode = "chat"; bubbleJump = nil
         bubbleJS("bubble.chat(false)")
-        bubbleJS("bubble.update(\(jsonLiteral(rel.version)), \(jsonLiteral(App.version)), \(App.oneClickUpdates))")
+        bubbleJS("bubble.update(\(jsonLiteral(rel.version)), \(jsonLiteral(App.version)), \(App.oneClickUpdates), \(App.builtLocally), \(installedCopy != nil))")
         showBubble(key: false)
     }
 
@@ -2150,6 +2150,27 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     #else
     static let oneClickUpdates = false
     #endif
+
+    /// A copy built on the Mac from the code (package.sh without a version) calls itself 1.0 and has no updater.
+    static var builtLocally: Bool { App.version == "1.0" }
+    /// The downloaded copy in Applications, when this isn't it.
+    var installedCopy: URL? {
+        let fm = FileManager.default
+        for dir in ["/Applications", fm.homeDirectoryForCurrentUser.path + "/Applications"] {
+            let u = URL(fileURLWithPath: dir).appendingPathComponent("Fox Buddy.app")
+            if fm.fileExists(atPath: u.path), u.standardizedFileURL.path != Bundle.main.bundleURL.standardizedFileURL.path { return u }
+        }
+        return nil
+    }
+    /// Quit this copy and open the one in Applications (they're the same app to macOS, so one has to go first).
+    func switchToInstalledCopy() {
+        guard let u = installedCopy else { return }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1.5; /usr/bin/open \"$0\"", u.path]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
 
     /// "Update" in his chat: install it with Sparkle, or (a build without it) download the DMG.
     func installUpdate() {
@@ -4506,6 +4527,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if body["lookAtScreen"] as? Bool == true { lookAtScreen() }
         if let u = body["update"] as? String {
             if u == "download" { installUpdate() }
+            if u == "switch" { switchToInstalledCopy() }
             if u == "notes", let rel = updateOffer { NSWorkspace.shared.open(rel.page) }
         }
         if let h = body["handoffCode"] as? [String: Any], let text = h["text"] as? String, !text.isEmpty {

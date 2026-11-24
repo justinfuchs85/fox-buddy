@@ -387,12 +387,20 @@
       mode('welcome'); wRender();
     },
     // a newer version of him is out
-    update(v, mine, oneClick) {
-      const d = addFox(markdown(`**There's a new version of me: ${v}.** You have ${mine}. ` + (oneClick
+    // local: this copy was built on the Mac from the code, with no updater; installed: there's a proper copy in Applications.
+    update(v, mine, oneClick, local = false, installed = false) {
+      document.querySelectorAll('.fox.upd').forEach(n => n.remove());          // one offer at a time, however often you check
+      const text = local
+        ? `**There's a new version of me: ${v}.** This copy was built on your Mac from my code, so it can't update itself. ` +
+          (installed ? "The one in Applications can: switch to it and update from there." : "Download the real one and drag it into Applications; after that, updates are one click.")
+        : `**There's a new version of me: ${v}.** You have ${mine}. ` + (oneClick
           ? "One click and I'll update myself and restart, and your settings stay put."
-          : "It's a quick swap, and your settings stay put.")) +
-        '<div class="tools"><button class="link dl">' + (oneClick ? 'Update' : 'Download') + '</button> <button class="link notes">What\'s new</button> <button class="link later">Not now</button></div>');
-      d.querySelector('.dl').onclick = () => post({ update: 'download' });
+          : "It's a quick swap, and your settings stay put.");
+      const go = local && installed ? 'Switch to the Installed Copy' : oneClick ? 'Update' : 'Download';
+      const d = addFox(markdown(text) +
+        '<div class="tools"><button class="link dl">' + go + '</button> <button class="link notes">What\'s new</button> <button class="link later">Not now</button></div>');
+      d.classList.add('upd');
+      d.querySelector('.dl').onclick = () => post({ update: local && installed ? 'switch' : 'download' });
       d.querySelector('.notes').onclick = () => post({ update: 'notes' });
       d.querySelector('.later').onclick = () => post({ action: 'dismiss' });
       scrollDown(); report(); },
