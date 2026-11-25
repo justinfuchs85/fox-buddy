@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<style>html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; } canvas { width: 100vmin; height: 100vmin; display: block; margin: auto; }</style>
+</head>
+<body>
+<canvas id="fox"></canvas>
+<script src="fox.js"></script>
+<script src="rig.js"></script>
+<script src="character.js"></script>
+<script>
+// Plays one of his looping moods, the same way the Mac player does: render() draws for a 240 x 240 canvas with a
+// black background (meant for the little hardware screen), so scale its transforms, skip that background and
+// soften the floor shadow it draws first.
+const L = window.__character, canvas = document.getElementById('fox'), raw = canvas.getContext('2d');
+let k = 1;
+function resize() {
+  const side = Math.min(innerWidth, innerHeight), dpr = devicePixelRatio || 1;
+  canvas.width = canvas.height = Math.max(1, Math.round(side * dpr));
+  k = canvas.width / 240;
+}
+addEventListener('resize', resize); resize();
+let bg = false, fills = 0;
+const ctx = new Proxy(raw, {
+  get(t, p) {
+    if (p === 'setTransform') return (a, b, c, d, e, f) => typeof a === 'number' ? t.setTransform(a * k, b * k, c * k, d * k, e * k, f * k) : t.setTransform(a);
+    if (p === 'resetTransform') return () => t.setTransform(k, 0, 0, k, 0, 0);
+    if (p === 'fillRect') return (x, y, w, h) => { if (!bg && x === 0 && y === 0 && w === 240 && h === 240) { bg = true; return; } t.fillRect(x, y, w, h); };
+    if (p === 'fill') return (...a) => { if (fills++ === 0) { const keep = t.fillStyle; t.fillStyle = 'rgba(0,0,0,.18)'; t.fill(...a); t.fillStyle = keep; return; } t.fill(...a); };
+    const v = t[p]; return typeof v === 'function' ? v.bind(t) : v;
+  },
+  set(t, p, v) { t[p] = v; return true; }
+});
+let frames = [], tick = 0, last = 0;
+function setMood(m) {
+  const seq = L.LOOPS[m] || L.LOOPS.idle;
+  frames = []; for (const [id, n] of seq) for (let i = 0; i < n; i++) frames.push(id);
+  tick = 0;
+}
+setMood('idle');
+function frame(now) {
+  if (now - last >= 1000 / 24) {
+    last = now;
+    raw.setTransform(1, 0, 0, 1, 0, 0); raw.clearRect(0, 0, canvas.width, canvas.height);
+    bg = false; fills = 0;
+    L.render(ctx, null, frames[tick % frames.length], tick, {});
+    tick++;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -266,6 +266,31 @@ release published on its own counts too. He checks every 5 minutes (every 2 whil
 GitHub's public API without signing in, so private repositories don't work. Check Now looks right away;
 Stop Watching removes one.
 
+## iPhone
+
+There's a Fox Buddy iPhone app (a companion, not a second fox: everything still happens on the Mac). For now
+it's built from the GitHub repo's ios folder with Xcode (ios/README.md, at
+https://github.com/justinfuchs85/fox-buddy/tree/main/ios), and shared to family through TestFlight; it isn't
+on the App Store.
+
+- Pair it: right-click › iPhone › Pair iPhone… shows a QR code; point the iPhone's Camera at it and tap the
+  link, then allow notifications. iPhone › Send a Test Alert checks it works. Pair Again… makes a new code
+  (the old pairing stops working); Unpair iPhone stops everything.
+- What reaches the phone: his alerts (Claude needs you or is done, a print finished, failed or paused, a
+  release shipped or a run failed, a site went down, an important email). With Only When I'm Away on (the
+  default), only while the Mac's been untouched for 3 minutes or its screen is locked.
+- Live Activities: a print in progress shows on the Lock Screen and in the Dynamic Island (his pose, the
+  job, percent, layer, when it'll be done), and ends showing done or failed. A long Claude job (3 minutes or
+  more, while they're away) shows too, with how long it's been running.
+- The app shows him animated, with the latest alerts.
+- Privacy: alert text is encrypted on the Mac with a key only the phone has (it was in the QR code), so the
+  relay in between and Apple can't read it. Live Activities can't be encrypted, so they only carry a short
+  status (the print's name, percent, layer). Don't share the QR code: it's the key.
+- Not yet: chatting with him from the phone, or a home-screen widget.
+- If alerts don't arrive: notifications allowed for Fox Buddy on the phone (Settings › Notifications); Send a
+  Test Alert says what's wrong ("hasn't checked in yet": open the app on the phone; "doesn't know this
+  pairing": pair again). And they only come when away, unless Only When I'm Away is off.
+
 ## 3D Printer (Bambu Lab)
 
 He can watch a Bambu Lab 3D printer (P1S, P1P, A1, X1 and the like) on the same network: right-click › 3D

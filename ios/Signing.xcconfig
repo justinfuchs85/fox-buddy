@@ -1,0 +1,6 @@
+// Fill these in once (ios/README.md says where to find them), then run xcodegen.
+//
+// Your Team ID: developer.apple.com › Account › Membership details (10 letters and digits).
+DEVELOPMENT_TEAM =
+// A bundle id prefix that's yours. The app becomes <prefix>.phone; the relay's APNS_TOPIC must match it.
+BUNDLE_PREFIX = com.foxbuddy

@@ -16,6 +16,8 @@ import Carbon.HIToolbox
 import IOKit.pwr_mgt
 import Cocoa
 import Contacts
+import CoreImage
+import CryptoKit
 import Network
 import ServiceManagement
 import WebKit
@@ -138,6 +140,118 @@ final class BoardLink {
     func send(_ line: String) {
         let line = line.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")   // always exactly one line
         queue.async { self.conn?.send(content: (line + "\n").data(using: .utf8), completion: .contentProcessed { _ in }) }
+    }
+}
+
+// MARK: - the iPhone
+
+/// The Fox Buddy app on your iPhone, reached through a small relay (relay/ in this repository: a Supabase edge
+/// function that sends Apple push notifications). Pairing makes three things on this Mac: a pair id, a secret
+/// (proves to the relay it's you) and a 256-bit key the relay never sees. The phone gets all three from a QR code.
+/// Alerts are encrypted with the key (AES-GCM) and decrypted on the phone; Live Activities (the Lock Screen and
+/// Dynamic Island) can't be, so those carry only a short status like "Printing Cable clip · 62%".
+/// Saved in ~/.desk-buddy/config.json "phone" (readable only by you); "phone_relay" overrides the relay's address.
+final class PhoneLink {
+    /// The relay the released app uses (Fuchs Labs's). "phone_relay" in config.json points at your own instead (relay/README.md).
+    static let builtInRelay = "https://euraxlqknuisazehpsla.supabase.co/functions/v1/foxbuddy-push"
+    struct Pairing { let relay: String; let pair: String; let secret: String; let key: SymmetricKey }
+
+    private var configURL: URL { Setup.runtime.appendingPathComponent("config.json") }
+    private func config() -> [String: Any] { ((try? JSONSerialization.jsonObject(with: Data(contentsOf: configURL))) as? [String: Any]) ?? [:] }
+    private func save(_ c: [String: Any]) {
+        if let d = try? JSONSerialization.data(withJSONObject: c, options: [.prettyPrinted]) {
+            FileManager.default.createFile(atPath: configURL.path, contents: d, attributes: [.posixPermissions: 0o600])
+        }
+    }
+    var relay: String {
+        let r = (config()["phone_relay"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        return r.hasPrefix("https://") ? r : PhoneLink.builtInRelay
+    }
+    var pairing: Pairing? {
+        guard let p = config()["phone"] as? [String: Any], let relay = p["relay"] as? String, let pair = p["pair"] as? String,
+              let secret = p["secret"] as? String, let k = (p["key"] as? String).flatMap({ PhoneLink.unb64url($0) }), k.count == 32 else { return nil }
+        return Pairing(relay: relay, pair: pair, secret: secret, key: SymmetricKey(data: k))
+    }
+    var paired: Bool { pairing != nil }
+
+    static func b64url(_ d: Data) -> String {
+        d.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
+    static func unb64url(_ s: String) -> Data? {
+        var t = s.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while t.count % 4 != 0 { t += "=" }
+        return Data(base64Encoded: t)
+    }
+    static func random(_ n: Int) -> Data {          // n bytes from the system's secure random source
+        var out = Data()
+        while out.count < n { out.append(SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }) }
+        return out.prefix(n)
+    }
+
+    /// A new pairing (forgetting any old one): returns the link the QR code holds.
+    func newPairing(foxName: String) -> URL? {
+        guard relay.hasPrefix("https://") else { return nil }
+        if let old = pairing { post(["op": "unpair"], old) }
+        let pair = UUID().uuidString.lowercased(), secret = PhoneLink.b64url(PhoneLink.random(32)), key = PhoneLink.b64url(PhoneLink.random(32))
+        var c = config()
+        c["phone"] = ["relay": relay, "pair": pair, "secret": secret, "key": key]
+        save(c)
+        var u = URLComponents()
+        u.scheme = "foxbuddy"; u.host = "pair"
+        u.queryItems = [.init(name: "r", value: relay), .init(name: "p", value: pair), .init(name: "s", value: secret),
+                        .init(name: "k", value: key), .init(name: "n", value: foxName)]
+        return u.url
+    }
+    func forget() {
+        if let p = pairing { post(["op": "unpair"], p) }
+        var c = config(); c["phone"] = nil; save(c)
+    }
+
+    /// POST to the relay as this pair. done gets the HTTP status (0: couldn't reach it) and the JSON reply.
+    func post(_ body: [String: Any], _ p: Pairing? = nil, done: ((Int, [String: Any]) -> Void)? = nil) {
+        guard let p = p ?? pairing, let url = URL(string: p.relay) else { done?(0, [:]); return }
+        var b = body; b["pair"] = p.pair; b["secret"] = p.secret
+        var req = URLRequest(url: url, timeoutInterval: 20)
+        req.httpMethod = "POST"; req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: b)
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let json = data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
+            DispatchQueue.main.async { done?(status, json) }
+        }.resume()
+    }
+
+    /// An alert, encrypted for the phone alone. kind: done, needs or info (the phone picks his pose from it).
+    func alert(_ text: String, kind: String, title: String, done: ((Int) -> Void)? = nil) {
+        guard let p = pairing else { done?(0); return }
+        let plain = text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+        let msg: [String: Any] = ["t": String(title.prefix(60)), "b": String(plain.prefix(400)), "k": kind, "at": Date().timeIntervalSince1970]
+        guard let data = try? JSONSerialization.data(withJSONObject: msg),
+              let sealed = try? AES.GCM.seal(data, using: p.key).combined else { done?(0); return }
+        post(["op": "alert", "enc": sealed.base64EncodedString()], p) { s, _ in done?(s) }
+    }
+
+    /// A Live Activity: action start, update or end; key "printer" or "claude". state follows the phone's ContentState:
+    /// mood (printing, working, waiting, done, failed, paused), headline, detail, and optional progress (0...1),
+    /// since and ends (Unix times).
+    func activity(_ action: String, key: String, title: String, state: [String: Any], alert: [String: String]? = nil) {
+        guard paired else { return }
+        var b: [String: Any] = ["op": "activity", "action": action, "key": key, "title": title, "state": state]
+        if let a = alert { b["alert"] = a }
+        post(b)
+    }
+
+    /// The QR code for a pairing link, crisp at the size shown.
+    static func qr(_ url: URL, side: CGFloat) -> NSImage? {
+        guard let f = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        f.setValue(Data(url.absoluteString.utf8), forKey: "inputMessage")
+        f.setValue("M", forKey: "inputCorrectionLevel")
+        guard let ci = f.outputImage else { return nil }
+        let scaled = ci.transformed(by: CGAffineTransform(scaleX: side / ci.extent.width * 2, y: side / ci.extent.height * 2))
+        let rep = NSCIImageRep(ciImage: scaled)
+        let img = NSImage(size: NSSize(width: side, height: side))
+        img.addRepresentation(rep)
+        return img
     }
 }
 
@@ -1314,6 +1428,7 @@ let TERMINAL_APPS: [String: String] = [
 
 final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     let link = BoardLink()
+    let phone = PhoneLink()
     var panel: FoxPanel!
     var web: WKWebView!
     var grab: GrabView!
@@ -1432,7 +1547,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         RunLoop.main.add(briefTimer, forMode: .common)
         // Whether you're at the Mac: he doesn't sleep through the night while you're using it.
-        let presence = Timer(timeInterval: 30, repeats: true) { [weak self] _ in self?.checkPresence() }
+        let presence = Timer(timeInterval: 30, repeats: true) { [weak self] _ in self?.checkPresence(); self?.checkPhone() }
         let sharing = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.checkSharing() }
         RunLoop.main.add(sharing, forMode: .common)
         let perch = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkPerch() }
@@ -1697,6 +1812,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func js(_ code: String) { web.evaluateJavaScript(code, completionHandler: nil) }
 
     func toFox(_ line: String) {
+        if line.hasPrefix("s ") { claudeMood(String(line.dropFirst(2))) }       // for the iPhone's Live Activity
         let quoted = (try? String(data: JSONSerialization.data(withJSONObject: [line]), encoding: .utf8)) ?? "[\"\"]"
         let call = "desk.line(\(quoted)[0])"
         if ready { js(call) } else { queued.append(call) }
@@ -1792,6 +1908,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         m.addItem(sub("Wander Around", [item("Wander Around Now and Then", #selector(toggleWander), on: wanderOn),
                                         item("Go Sit on My Window", #selector(wanderNow))]))
         m.addItem(sub("Stretch Breaks", moveItems()))
+        m.addItem(sub("iPhone", phoneItems()))
         m.addItem(sub("3D Printer", printerItems()))
         m.addItem(sub("Ship Watcher", shipItems()))
         m.addItem(sub("Site Checks", siteItems()))
@@ -2302,6 +2419,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         if let h = n["hold"] as? [String: Any], let mood = h["mood"] as? String, mood.range(of: #"^[a-z]{1,20}$"#, options: .regularExpression) != nil {
             js("desk.hold('\(mood)', \(min(max((h["ms"] as? Int) ?? 30000, 1000), 120000)))")
         }
+        if kind == "done" || kind == "needs" { phoneAlert(text, kind: kind) }     // away from the Mac: to the iPhone too
         if narrate == "off" { return }
         if narrate == "important" && kind == "working" {
             if bubbleMode == "say" && bubbleKind == "needs" { hideBubble() }      // Claude's moving again: that's been dealt with
@@ -2829,6 +2947,128 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         say(m == 0 ? "No more stretch reminders." : "After \(m == 60 ? "an hour" : m == 90 ? "90 minutes" : "2 hours") at it without a break, I'll suggest a stretch.")
     }
 
+    // MARK: iPhone
+
+    /// Pairs the Fox Buddy iPhone app (by QR code) and sends it his alerts, when you're away from the Mac, plus Live
+    /// Activities on the Lock Screen and Dynamic Island: a print in progress, and a long Claude job while you're away.
+    func phoneItems() -> [NSMenuItem] {
+        guard phone.paired else { return [item("Pair iPhone…", #selector(pairPhone))] }
+        return [item("Send a Test Alert", #selector(testPhone)),
+                item("Only When I'm Away", #selector(togglePhoneAway), on: !prefs.bool(forKey: "phoneAlways")), .separator(),
+                item("Pair Again…", #selector(pairPhone)), item("Unpair iPhone", #selector(unpairPhone))]
+    }
+    @objc func pairPhone() {
+        guard let link = phone.newPairing(foxName: FoxSetup.load().foxName) else {
+            say("There's no relay set up for the iPhone yet: it needs \"phone_relay\" in ~/.desk-buddy/config.json (relay/README.md says how)."); return
+        }
+        phone.post(["op": "hello"]) { [weak self] status, _ in
+            if status != 200 { self?.say("I couldn't reach the iPhone relay (\(status == 0 ? "no answer" : "error \(status)")). Check your connection and try Pair iPhone again.") }
+        }
+        let a = NSAlert()
+        a.messageText = "Point your iPhone's camera at this"
+        a.informativeText = "With the Fox Buddy app installed, tap the link the Camera shows. That's it: when you're away from the Mac, his alerts come to your phone, and prints show on your Lock Screen. The code is a key to your alerts, so don't share it."
+        let side: CGFloat = 220
+        let iv = NSImageView(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        iv.image = PhoneLink.qr(link, side: side); iv.imageScaling = .scaleProportionallyUpOrDown
+        a.accessoryView = iv
+        a.addButton(withTitle: "Done"); a.addButton(withTitle: "Copy Link")
+        NSApp.activate(ignoringOtherApps: true)
+        if a.runModal() == .alertSecondButtonReturn {
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link.absoluteString, forType: .string)
+            say("Pairing link copied. Open it on the iPhone (AirDrop it, or paste it into the app).")
+        }
+    }
+    @objc func testPhone() {
+        phone.alert("Hello from your Mac. This is what my alerts look like here.", kind: "done", title: FoxSetup.load().foxName) { [weak self] s in
+            switch s {
+            case 200: self?.say("Sent. Check your iPhone.")
+            case 409: self?.say("Your iPhone hasn't checked in yet: open Fox Buddy on it and allow notifications.")
+            case 403: self?.say("The relay doesn't know this pairing anymore. Pair the iPhone again.")
+            default: self?.say("That didn't go through (\(s == 0 ? "no answer from the relay" : "error \(s)")).")
+            }
+        }
+    }
+    @objc func togglePhoneAway() { prefs.set(!prefs.bool(forKey: "phoneAlways"), forKey: "phoneAlways") }
+    @objc func unpairPhone() {
+        phone.forget()
+        say("Unpaired. Your iPhone won't get anything from me now.")
+    }
+
+    /// Away: nothing touched for 3 minutes, or the screen locked. (Or "Only When I'm Away" switched off.)
+    var phoneAway: Bool {
+        if prefs.bool(forKey: "phoneAlways") { return true }
+        let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+        return locked || App.idleSeconds() > 180
+    }
+    func phoneAlert(_ text: String, kind: String) {
+        guard phone.paired, phoneAway else { return }
+        phone.alert(text, kind: kind, title: FoxSetup.load().foxName)
+    }
+
+    // Live Activities: what's showing on the phone, so updates only go out when something changed.
+    var phonePrint: (job: String, pct: Int, state: String, at: Date)?
+    var claudeState = "idle", claudeSince: Date?, phoneClaude: (state: String, at: Date)?
+    func claudeMood(_ m: String) {
+        let st = ["working": "working", "longhaul": "working", "alert": "waiting", "waiting": "waiting", "done": "done"][m] ?? "idle"
+        if st == "working" && claudeState != "working" && claudeState != "waiting" { claudeSince = Date() }
+        claudeState = st
+    }
+    func checkPhone() {
+        guard phone.paired else { phonePrint = nil; phoneClaude = nil; return }
+        checkPhonePrint(); checkPhoneClaude()
+    }
+    func checkPhonePrint() {
+        let d = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: App.printerFile))) as? [String: Any]) ?? [:]
+        let state = (d["state"] as? String ?? "").uppercased(), job = (d["job"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "your print"
+        let name = d["name"] as? String ?? "Printer", pct = d["percent"] as? Int ?? 0
+        let live = d["connection"] as? String == "connected"
+        if ["RUNNING", "PREPARE", "PAUSE"].contains(state) && live {
+            var cs: [String: Any] = ["mood": state == "PAUSE" ? "paused" : "printing",
+                                     "headline": (state == "PAUSE" ? "Paused: " : state == "PREPARE" ? "Starting " : "Printing ") + job,
+                                     "detail": (d["layer"] as? Int).flatMap { l in (d["total_layers"] as? Int).map { "Layer \(l) of \($0)" } } ?? name,
+                                     "progress": Double(pct) / 100]
+            if state == "RUNNING", let rem = d["remaining_min"] as? Int, rem > 0 {
+                cs["ends"] = ((d["heard"] as? Double) ?? Date().timeIntervalSince1970) + Double(rem * 60)
+            }
+            if let started = d["started"] as? Double { cs["since"] = started }
+            if phonePrint == nil || phonePrint!.job != job {
+                phone.activity("start", key: "printer", title: name, state: cs, alert: ["title": name, "body": "Printing \(job)"])
+                phonePrint = (job, pct, state, Date())
+            } else if let p = phonePrint, p.state != state || (pct - p.pct >= 2 && Date().timeIntervalSince(p.at) >= 60) {
+                phone.activity("update", key: "printer", title: name, state: cs)
+                phonePrint = (job, pct, state, Date())
+            }
+        } else if let p = phonePrint, ["FINISH", "FAILED", "IDLE"].contains(state) || d.isEmpty {
+            let ok = state == "FINISH"
+            phone.activity("end", key: "printer", title: name, state: ["mood": ok ? "done" : "failed", "headline": (ok ? "Done: " : "Stopped: ") + p.job,
+                                                                       "detail": name, "progress": ok ? 1.0 : Double(pct) / 100])
+            phonePrint = nil
+        }
+    }
+    /// A long Claude job while you're away: shows once it's been working 3 minutes; ends when it's done.
+    func checkPhoneClaude() {
+        let title = "Claude"
+        switch claudeState {
+        case "working", "waiting":
+            let since = claudeSince ?? Date()
+            let cs: [String: Any] = ["mood": claudeState, "headline": claudeState == "waiting" ? "Claude needs you" : "Claude is working",
+                                     "detail": claudeState == "waiting" ? "Waiting for your answer" : "On your Mac", "since": since.timeIntervalSince1970]
+            if phoneClaude == nil {
+                guard phoneAway, Date().timeIntervalSince(since) >= 180 else { return }
+                phone.activity("start", key: "claude", title: title, state: cs, alert: ["title": FoxSetup.load().foxName, "body": "Claude's on a long one. I'll keep you posted."])
+                phoneClaude = (claudeState, Date())
+            } else if phoneClaude!.state != claudeState {
+                phone.activity("update", key: "claude", title: title, state: cs)
+                phoneClaude = (claudeState, Date())
+            }
+        default:
+            guard phoneClaude != nil else { return }
+            phone.activity("end", key: "claude", title: title, state: ["mood": "done", "headline": "Claude is done", "detail": "On your Mac",
+                                                                       "since": (claudeSince ?? Date()).timeIntervalSince1970])
+            phoneClaude = nil
+        }
+    }
+
     // MARK: 3D printer
 
     /// A Bambu Lab printer on your network (config.json "printer": host, serial, access_code, name). The bridge listens
@@ -3006,6 +3246,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
     func celebrate(_ text: String, url: String, label: String) {
         js("desk.hold('flag', 25000)")
         bubbleJump = ["url": url]; bubbleKind = "done"; bubbleMode = "say"
+        phoneAlert(text, kind: "done")
         bubbleJS("bubble.show(\(jsonLiteral(["text": text, "kind": "done", "jump": true, "jumpLabel": label] as [String: Any])))")
         showBubble(key: false)
     }
@@ -3022,6 +3263,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
                 guard let self = self else { return }
                 let what = branch.isEmpty ? "**\(name)**" : "**\(name)** for \(branch)"
                 self.bubbleJump = ["url": link]; self.bubbleKind = "needs"; self.bubbleMode = "say"
+                self.phoneAlert("\(what) in \(repo) failed\(step.isEmpty ? "" : " at \"\(step)\""). Nothing went out.", kind: "needs")
                 self.bubbleJS("bubble.show(\(self.jsonLiteral(["text": "\(what) in \(repo) failed\(step.isEmpty ? "" : " at \"\(step)\""). Nothing went out.", "kind": "needs", "jump": true, "jumpLabel": "See the run"] as [String: Any])))")
                 self.showBubble(key: false)
             }
@@ -3113,6 +3355,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
                 st["downSince"] = now - 300
                 js("desk.hold('alert', 30000)")
                 bubbleJump = ["url": site]; bubbleKind = "needs"; bubbleMode = "say"
+                phoneAlert("\(host) looks down: \(why.isEmpty ? "no answer" : why).", kind: "needs")
                 bubbleJS("bubble.show(\(jsonLiteral(["text": "**\(host)** looks down: \(why.isEmpty ? "no answer" : why). I'll tell you when it's back.", "kind": "needs", "jump": true, "jumpLabel": "Open it"] as [String: Any])))")
                 showBubble(key: false)
             }
@@ -4465,6 +4708,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, WKScriptMessag
         }
         if hiddenByUser || bubble == nil { return }
         bubbleJump = ["url": url]; bubbleKind = "needs"; bubbleMode = "say"
+        phoneAlert("📬 " + text, kind: "needs")
         bubbleJS("bubble.show(\(jsonLiteral(["text": "📬 " + text, "kind": "needs", "jump": true, "jumpLabel": "Open in Gmail"] as [String: Any])))")
         showBubble(key: false)
     }
